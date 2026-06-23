@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>英语词汇量估算工具</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="topbar">
+        <div>
+          <h1>英语词汇量估算工具</h1>
+          <p id="bankInfo">词库加载中</p>
+        </div>
+        <button id="recordsBtn" class="ghost" type="button">历史</button>
+      </section>
+
+      <section id="setupView" class="panel">
+        <label>
+          姓名
+          <input id="studentName" type="text" placeholder="匿名学生" autocomplete="name" />
+        </label>
+        <label>
+          CET 分数
+          <input id="cetScore" type="number" min="0" max="750" placeholder="可选" />
+        </label>
+        <label>
+          每个词频层抽样数
+          <select id="perBucket">
+            <option value="4" selected>4（约 36 题）</option>
+            <option value="6">6（约 54 题）</option>
+            <option value="8">8（约 72 题）</option>
+          </select>
+        </label>
+        <button id="startBtn" class="primary" type="button">开始测试</button>
+      </section>
+
+      <section id="testView" class="panel hidden">
+        <div class="testHeader">
+          <div>
+            <strong id="pageTitle">第 1/0 题</strong>
+            <span id="phaseIndicator"></span>
+            <span id="progressText">0/0</span>
+          </div>
+          <progress id="progressBar" value="0" max="100"></progress>
+        </div>
+        <div id="wordList" class="quizStage" aria-live="polite"></div>
+        <div class="pager submitPager">
+          <button id="submitBtn" type="button" class="primary hidden">提交</button>
+        </div>
+      </section>
+
+      <section id="resultView" class="panel hidden">
+        <h2>测试结果</h2>
+        <div id="resultBox" class="resultGrid"></div>
+        <div class="actions">
+          <button id="restartBtn" class="ghost" type="button">重新测试</button>
+          <button id="saveBtn" class="primary" type="button">保存记录</button>
+        </div>
+        <p id="saveStatus" class="status"></p>
+      </section>
+
+      <section id="recordsView" class="panel hidden">
+        <div class="sectionHeader">
+          <h2>历史记录</h2>
+          <button id="backBtn" class="ghost" type="button">返回</button>
+        </div>
+        <div id="recordsList" class="recordsList"></div>
+      </section>
+
+      <p id="message" class="message" role="status"></p>
+    </main>
+
+    <script src="/web/app.js?v=2"></script>
+  </body>
+</html>

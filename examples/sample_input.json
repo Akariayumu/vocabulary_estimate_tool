@@ -1,0 +1,30 @@
+{
+  "responses": {
+    "C": [
+      ["the", true], ["school", true], ["water", true], ["computer", true],
+      ["language", true], ["analysis", true], ["strategy", true],
+      ["coherent", true], ["ubiquitous", true], ["paradox", false]
+    ],
+    "F": [
+      ["the", true], ["school", true], ["computer", true], ["language", true],
+      ["analysis", true], ["strategy", true], ["coherent", true],
+      ["paradigm", false], ["ubiquitous", false], ["meticulous", false]
+    ],
+    "P": [
+      ["the", true], ["school", true], ["computer", true], ["analysis", true],
+      ["strategy", true], ["coherent", false], ["paradigm", false],
+      ["ubiquitous", false], ["meticulous", false], ["perspicacious", false]
+    ],
+    "K": [
+      ["the", true], ["school", true], ["computer", true], ["analysis", true],
+      ["strategy", false], ["coherent", false], ["paradigm", false],
+      ["ubiquitous", false], ["meticulous", false], ["perspicacious", false]
+    ]
+  },
+  "documents": {
+    "C": ["examples/doc_c.txt"],
+    "F": ["examples/doc_f.txt"],
+    "P": ["examples/doc_p.txt"],
+    "K": ["examples/doc_k.txt"]
+  }
+}
