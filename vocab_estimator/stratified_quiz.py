@@ -58,7 +58,7 @@ def _sigmoid_scalar(x: float) -> float:
 # ── 项目路径 ─────────────────────────────────────────────────────────────────
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_STAGE_VOCAB_PATH = _PROJECT_ROOT / "data" / "stage_vocab.json"
+_STAGE_VOCAB_PATH = _PROJECT_ROOT / "data" / "stage_vocab_clean_v1.json"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

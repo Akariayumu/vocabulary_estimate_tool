@@ -33,10 +33,10 @@ from .translations import TRANSLATIONS
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = PROJECT_ROOT / "web"
 VOCAB_VERSION_PATHS = {
-    "v1": PROJECT_ROOT / "data" / "stage_vocab.json",
-    "original": PROJECT_ROOT / "data" / "stage_vocab.json",
-    "v2": PROJECT_ROOT / "data" / "stage_vocab_v2_clusterv1.json",
-    "v2_clusterv1": PROJECT_ROOT / "data" / "stage_vocab_v2_clusterv1.json",
+    "v1": PROJECT_ROOT / "data" / "stage_vocab_clean_v1.json",
+    "original": PROJECT_ROOT / "data" / "stage_vocab_clean_v1.json",
+    "v2": PROJECT_ROOT / "data" / "stage_vocab_clean_v2.json",
+    "v2_clusterv1": PROJECT_ROOT / "data" / "stage_vocab_clean_v2.json",
 }
 VOCAB_VERSION_CANONICAL = {
     "v1": "v1",

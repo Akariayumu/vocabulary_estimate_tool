@@ -13,7 +13,7 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_STAGE_VOCAB_PATH = PROJECT_ROOT / "data" / "stage_vocab.json"
+DEFAULT_STAGE_VOCAB_PATH = PROJECT_ROOT / "data" / "stage_vocab_clean_v1.json"
 
 WORD_RE = re.compile(r"[a-z]+(?:-[a-z]+)*")
 
