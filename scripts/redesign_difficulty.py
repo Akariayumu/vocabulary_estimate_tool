@@ -9,6 +9,7 @@ This script intentionally leaves ``data/stage_vocab.json`` and
 from __future__ import annotations
 
 import argparse
+import bisect
 import copy
 import hashlib
 import json
@@ -133,11 +134,6 @@ def priority_to_stage(priority: float) -> str:
     return "ielts"
 
 
-def stage_median_rank_for_priority(priority: float) -> int:
-    stage = priority_to_stage(priority)
-    return _STAGE_MEDIAN_RANK.get(stage, 15_000)
-
-
 def rank_for_priority(priority: float) -> int:
     """Choose a rank whose interpolated priority is near ``priority``."""
     bounded = max(1.0, min(11.0, priority))
@@ -220,7 +216,7 @@ def rank_for_word(
     return 15_000, "global_default"
 
 
-def rebuild_stages_clusters_and_overlap(vocab: dict[str, Any]) -> None:
+def rebuild_stages(vocab: dict[str, Any]) -> None:
     word_to_stage = vocab["word_to_stage"]
     stages = vocab.get("stages") or {}
     for stage_info in stages.values():
@@ -243,6 +239,9 @@ def rebuild_stages_clusters_and_overlap(vocab: dict[str, Any]) -> None:
         stage_info["words"] = words
         stage_info["count"] = len(words)
 
+
+def rebuild_quantile_clusters(vocab: dict[str, Any]) -> None:
+    word_to_stage = vocab["word_to_stage"]
     sorted_words = sorted(
         (float(info["difficulty"]), word)
         for word, info in word_to_stage.items()
@@ -253,6 +252,69 @@ def rebuild_stages_clusters_and_overlap(vocab: dict[str, Any]) -> None:
         word_to_stage[word]["cluster_20"] = min(19, int(index * 20 / total))
         word_to_stage[word]["cluster_100"] = min(99, int(index * 100 / total))
 
+
+def median(values: list[float]) -> float:
+    values = sorted(values)
+    if not values:
+        raise ValueError("median() requires at least one value")
+    return values[len(values) // 2]
+
+
+def monotonic(values: list[float]) -> list[float]:
+    """Return a non-decreasing version suitable for threshold construction."""
+    result: list[float] = []
+    current = 0.0
+    for value in values:
+        current = max(current, value)
+        result.append(current)
+    return result
+
+
+def assign_anchored_cluster(difficulty: float, centers: list[float]) -> int:
+    boundaries = [(centers[i] + centers[i + 1]) / 2.0 for i in range(len(centers) - 1)]
+    return min(len(centers) - 1, bisect.bisect_right(boundaries, difficulty))
+
+
+def rebuild_anchored_clusters(vocab: dict[str, Any], original: dict[str, Any]) -> dict[str, Any]:
+    """Keep original words on their legacy buckets; place added words by v2 score.
+
+    This preserves migration semantics for existing quiz/history data while still
+    using the unified v2 difficulty for every word and for new-word placement.
+    """
+    word_to_stage = vocab["word_to_stage"]
+    original_entries = original["word_to_stage"]
+    original_words = set(original_entries)
+    stats: dict[str, Any] = {"anchor_centers": {}}
+
+    for cluster_key, n_classes in (("cluster_20", 20), ("cluster_100", 100)):
+        centers: list[float] = []
+        for cluster in range(n_classes):
+            values = [
+                float(word_to_stage[word]["difficulty"])
+                for word, info in original_entries.items()
+                if word in word_to_stage and info.get(cluster_key) == cluster
+            ]
+            if values:
+                centers.append(median(values))
+            elif centers:
+                centers.append(centers[-1])
+            else:
+                centers.append(0.0)
+        centers = monotonic(centers)
+        stats["anchor_centers"][cluster_key] = [round(value, 4) for value in centers]
+
+        for word, info in word_to_stage.items():
+            if word in original_words and original_entries[word].get(cluster_key) is not None:
+                info[cluster_key] = int(original_entries[word][cluster_key])
+            else:
+                info[cluster_key] = assign_anchored_cluster(float(info["difficulty"]), centers)
+
+    return stats
+
+
+def rebuild_overlap_and_sort(vocab: dict[str, Any]) -> None:
+    word_to_stage = vocab["word_to_stage"]
+    stages = vocab.get("stages") or {}
     stage_sets = {stage: set(info["words"]) for stage, info in stages.items()}
     vocab["overlap_matrix"] = {
         stage_a: {
@@ -269,6 +331,8 @@ def recalibrate(
     original: dict[str, Any],
     enhanced: dict[str, Any],
     exam_vocab: dict[str, dict[str, int]],
+    *,
+    cluster_mode: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     original_entries = original["word_to_stage"]
     enhanced_entries = enhanced["word_to_stage"]
@@ -283,7 +347,6 @@ def recalibrate(
         "added_word_count": len(set(output["word_to_stage"]) - original_words),
         "rank_source_counts": Counter(),
         "priority_source_counts": Counter(),
-        "missing_rank_examples": [],
         "difficulty_delta_original": {},
     }
 
@@ -316,10 +379,7 @@ def recalibrate(
                 is_original_word=False,
                 priority=priority,
             )
-            if preliminary_rank_source != rank_source and preliminary_rank_source == "global_default":
-                stats["rank_source_counts"][rank_source] += 1
-            else:
-                stats["rank_source_counts"][rank_source] += 1
+            stats["rank_source_counts"][rank_source] += 1
             stats["priority_source_counts"][priority_source] += 1
             info["first_stage"] = priority_to_stage(priority)
             info["all_stages"] = [info["first_stage"]]
@@ -355,9 +415,19 @@ def recalibrate(
             "max_abs": round(max(original_deltas), 6),
         }
 
-    rebuild_stages_clusters_and_overlap(output)
+    rebuild_stages(output)
+    if cluster_mode == "anchored":
+        cluster_stats = rebuild_anchored_clusters(output, original)
+    elif cluster_mode == "quantile":
+        rebuild_quantile_clusters(output)
+        cluster_stats = {}
+    else:
+        raise ValueError(f"unsupported cluster mode: {cluster_mode}")
+    rebuild_overlap_and_sort(output)
     stats["rank_source_counts"] = dict(stats["rank_source_counts"])
     stats["priority_source_counts"] = dict(stats["priority_source_counts"])
+    stats["cluster_mode"] = cluster_mode
+    stats["cluster_stats"] = cluster_stats
     return output, stats
 
 
@@ -385,7 +455,10 @@ def write_output(path: Path, data: dict[str, Any], *, original: Path, enhanced: 
             "fallback_2_original": "_STAGE_MEDIAN_RANK[first_stage]",
             "fallback_2_added": "inverse _RANK_TO_PRIORITY_KNOTS from assigned priority",
         },
-        "clusters": "equal-frequency assignment after sorting by (difficulty, word)",
+        "clusters": (
+            "anchored: original words keep legacy clusters and added words are assigned from v2 difficulty "
+            "against original-word anchor centers; quantile mode is available via --cluster-mode quantile"
+        ),
         "input_hashes": {
             str(original.relative_to(PROJECT_ROOT)): file_sha256(original),
             str(enhanced.relative_to(PROJECT_ROOT)): file_sha256(enhanced),
@@ -408,6 +481,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enhanced", type=Path, default=DEFAULT_ENHANCED)
     parser.add_argument("--exam-dir", type=Path, default=DEFAULT_EXAM_DIR)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--cluster-mode",
+        choices=("anchored", "quantile"),
+        default="anchored",
+        help="anchored preserves original-word cluster labels; quantile recomputes equal-frequency buckets over all words.",
+    )
     return parser.parse_args()
 
 
@@ -417,7 +496,7 @@ def main() -> int:
     enhanced = load_json(args.enhanced)
     exam_vocab = load_exam_vocab(args.exam_dir)
 
-    output, stats = recalibrate(original, enhanced, exam_vocab)
+    output, stats = recalibrate(original, enhanced, exam_vocab, cluster_mode=args.cluster_mode)
     write_output(
         args.output,
         output,
