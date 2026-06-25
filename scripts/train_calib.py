@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fast calibration training: pre-compute raw estimates, then fit α/β/k/knots."""
+"""快速校准训练：预计算 raw estimates，再拟合 α/β/k/knots。"""
 import sys, json, math
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -12,19 +12,19 @@ import numpy as np
 bank = VocabBank(EstimatorConfig())
 estimator = VocabEstimator(bank, EstimatorConfig())
 
-# ── Load data ──
+# ── 加载数据 ──
 with open("test_samples_trainer.json") as f:
     raw = json.load(f)
 users = raw["users"]
 print(f"Loaded {len(users)} synthetic users")
 
-# ── Test with 20 representative levels ──
-levels = list(range(500, 20001, 1000))  # 20 levels
+# ── 使用 20 个代表等级测试 ──
+levels = list(range(500, 20001, 1000))  # 20 个等级
 print(f"Testing {len(levels)} levels (1 user each):")
 
 results = []
 for v in levels:
-    # Pick first user at this vocab level
+    # 选择该词汇量等级的第一个用户
     vu = [u for u in users if u["vocab_size"] == v]
     if not vu:
         continue
@@ -34,9 +34,9 @@ for v in levels:
     results.append((v, r["point_estimate"], r["raw_estimate"], r["logistic_estimate"]))
     print(f"  v={v:>5}: pred={r['point_estimate']:>5} raw={r['raw_estimate']:>5} log={r['logistic_estimate']:>5}")
 
-# ── Calibrate function with tunable params ──
+# ── 带可调参数的校准函数 ──
 def calibrate_simple(raw_est, k, k1, k2, k3):
-    """Same as VocabEstimator.calibrate with tunable piecewise slopes."""
+    """与 VocabEstimator.calibrate 相同，但 piecewise slopes 可调。"""
     cal = 20000.0 * math.tanh(k * raw_est)
     b = [3000, 8000, 22000]
     ks = [k1, k2, k3]
@@ -48,16 +48,16 @@ def calibrate_simple(raw_est, k, k1, k2, k3):
         prev_b = boundary
     return prev_v + (cal - prev_b) * ks[-1]
 
-# ── Loss over all users ──
+# ── 所有用户上的 loss ──
 
 def fast_estimate(responses):
-    """Fast point estimate without bootstrap."""
+    """不使用 bootstrap 的快速点估计。"""
     return estimator.logistic_estimate(responses)["estimate"]
 
 def full_loss(k, k1, k2, k3):
     total = 0.0
     n = 0
-    for u in users[:200]:  # subset for speed
+    for u in users[:200]:  # 为提速使用子集
         resp = [(r["word"], r["known"]) for r in u["responses"]]
         log_est = estimator.logistic_estimate(resp)["estimate"]
         pred = calibrate_simple(log_est, k, k1, k2, k3)
@@ -66,14 +66,14 @@ def full_loss(k, k1, k2, k3):
         n += 1
     return total / n
 
-# ── Evaluate current params ──
+# ── 评估当前参数 ──
 k_current = 0.0000691
 k1, k2, k3 = 1.0, 0.45, 1.28
 l = full_loss(k_current, k1, k2, k3)
 print(f"\n{'='*50}")
 print(f"Current loss (200 users): {l:.0f}")
 
-# ── Test adjustments ──
+# ── 测试调整 ──
 print(f"\nSensitivity analysis:")
 for k_test in [0.00003, 0.00005, 0.0000691, 0.00008, 0.00010]:
     l = full_loss(k_test, k1, k2, k3)
@@ -104,7 +104,7 @@ if best:
     print(f"  k={best[0]:.7f}, k1={best[1]:.2f}, k2={best[2]:.2f}, k3={best[3]:.2f}")
     print(f"  loss: {best_loss:.0f} (vs current {full_loss(k_current, k1, k2, k3):.0f})")
     
-    # Show improvement
+    # 展示改进
     print(f"\n{'='*50}")
     print(f"Before vs After:")
     print(f"{'Vocab':>8} {'Before':>8} {'After':>8} {'Bias_B':>8} {'Bias_A':>8}")

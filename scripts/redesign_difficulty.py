@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Recompute enhanced vocabulary difficulty with one unified calibration.
+"""使用统一校准重新计算增强词库 difficulty。
 
-This script intentionally leaves ``data/stage_vocab.json`` and
-``data/stage_vocab_enhanced.json`` untouched, and writes a new
-``data/stage_vocab_v2.json``.
+此脚本有意不改动 ``data/stage_vocab.json`` 和
+``data/stage_vocab_enhanced.json``，而是写入新的
+``data/stage_vocab_v2.json``。
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ def priority_to_stage(priority: float) -> str:
 
 
 def rank_for_priority(priority: float) -> int:
-    """Choose a rank whose interpolated priority is near ``priority``."""
+    """选择插值 priority 接近 ``priority`` 的 rank。"""
     bounded = max(1.0, min(11.0, priority))
     knots = _RANK_TO_PRIORITY_KNOTS
     if bounded <= knots[0][1]:
@@ -261,7 +261,7 @@ def median(values: list[float]) -> float:
 
 
 def monotonic(values: list[float]) -> list[float]:
-    """Return a non-decreasing version suitable for threshold construction."""
+    """返回适合构造阈值的非递减版本。"""
     result: list[float] = []
     current = 0.0
     for value in values:
@@ -276,10 +276,9 @@ def assign_anchored_cluster(difficulty: float, centers: list[float]) -> int:
 
 
 def rebuild_anchored_clusters(vocab: dict[str, Any], original: dict[str, Any]) -> dict[str, Any]:
-    """Keep original words on their legacy buckets; place added words by v2 score.
+    """将原始词保留在 legacy buckets；新增词按 v2 分数放置。
 
-    This preserves migration semantics for existing quiz/history data while still
-    using the unified v2 difficulty for every word and for new-word placement.
+    这样既保留现有 quiz/history 数据的迁移语义，又能为每个词和新词放置使用统一的 v2 difficulty。
     """
     word_to_stage = vocab["word_to_stage"]
     original_entries = original["word_to_stage"]
@@ -370,7 +369,7 @@ def recalibrate(
             priority, priority_source = priority_for_new_word(
                 word, info, preliminary_rank, exam_vocab
             )
-            # Re-run rank fallback with known priority for exam-only words.
+            # 对 exam-only 词使用已知 priority 重新运行 rank fallback。
             rank, rank_source = rank_for_word(
                 word,
                 info,

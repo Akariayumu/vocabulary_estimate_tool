@@ -1,8 +1,7 @@
-"""Lemma normalization for English words.
+"""英语单词的 lemma 归一化。
 
-The primary implementation uses spaCy's ``en_core_web_sm`` model. If spaCy or
-the model is unavailable, the module falls back to a conservative rule-based
-normalizer so the estimator remains runnable in constrained environments.
+主实现使用 spaCy 的 ``en_core_web_sm`` 模型。若 spaCy 或模型不可用，
+模块会回退到保守的规则型归一化器，保证估算器在受限环境中仍可运行。
 """
 
 from __future__ import annotations
@@ -14,10 +13,10 @@ WORD_RE = re.compile(r"^[A-Za-z]+(?:'[A-Za-z]+)?$")
 
 
 class Lemmatizer:
-    """Normalize inflected English word forms to lemmas.
+    """将英语屈折词形归一化为 lemma。
 
-    Proper nouns, numeric strings and likely abbreviations are deliberately not
-    normalized because merging them would distort vocabulary-size estimates.
+    专有名词、数字字符串和疑似缩写会有意保留，不做归一化，
+    因为合并它们会扭曲词汇量估算。
     """
 
     def __init__(self, model_name: str = "en_core_web_sm") -> None:
@@ -35,7 +34,7 @@ class Lemmatizer:
 
     @staticmethod
     def is_abbreviation(word: str) -> bool:
-        """Return True for likely abbreviations/acronyms such as ``NASA``."""
+        """对 ``NASA`` 这类疑似缩写/acronym 返回 True。"""
 
         stripped = word.replace(".", "")
         return (
@@ -46,18 +45,18 @@ class Lemmatizer:
 
     @staticmethod
     def is_proper_like(word: str) -> bool:
-        """Return True for capitalized words that should not be merged."""
+        """对不应合并的首字母大写词返回 True。"""
 
         return len(word) > 1 and word[0].isupper() and word[1:].islower()
 
     @staticmethod
     def is_valid_word(word: str) -> bool:
-        """Return True if ``word`` is an alphabetic English token."""
+        """若 ``word`` 是纯字母英语 token，则返回 True。"""
 
         return bool(WORD_RE.match(word)) and not any(ch.isdigit() for ch in word)
 
     def should_preserve(self, word: str) -> bool:
-        """Return True when a token should bypass lemmatization."""
+        """当 token 应跳过 lemmatization 时返回 True。"""
 
         if not word or any(ch.isdigit() for ch in word):
             return True
@@ -69,9 +68,9 @@ class Lemmatizer:
 
     @lru_cache(maxsize=100_000)
     def normalize(self, word: str) -> str:
-        """Return a normalized lemma for ``word``.
+        """返回 ``word`` 的归一化 lemma。
 
-        Examples:
+        示例：
             ``running`` -> ``run``; ``cars`` -> ``car``; ``NASA`` -> ``NASA``.
         """
 
@@ -91,7 +90,7 @@ class Lemmatizer:
 
     @staticmethod
     def _rule_based_lemma(word: str) -> str:
-        """Conservative fallback lemmatizer for common inflections."""
+        """用于常见屈折形式的保守 fallback lemmatizer。"""
 
         irregular = {
             "children": "child",
@@ -141,6 +140,6 @@ class Lemmatizer:
         return word
 
     def is_same_lemma(self, w1: str, w2: str) -> bool:
-        """Return True if two surface forms normalize to the same lemma."""
+        """若两个表层词形归一化到同一 lemma，则返回 True。"""
 
         return self.normalize(w1) == self.normalize(w2)

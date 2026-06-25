@@ -1,8 +1,7 @@
-"""Vocabulary-bank construction from frequency ranks.
+"""基于频率 rank 构建词库。
 
-The bank prefers ``wordfreq`` for rank data and falls back to a compact built-in
-list when dependencies are unavailable. Words are collapsed into lemma families,
-filtered, and then assigned to frequency-rank buckets.
+词库优先使用 ``wordfreq`` 提供 rank 数据；依赖不可用时回退到紧凑的内置列表。
+词会先合并为 lemma families，经过过滤后再分配到 frequency-rank buckets。
 """
 
 from __future__ import annotations
@@ -104,7 +103,7 @@ scrupulous serendipity taciturn ubiquitous vacillate venerable vindicate zealot
 
 @dataclass(frozen=True)
 class VocabItem:
-    """One lemma-family entry in the vocabulary bank."""
+    """词库中的一个 lemma-family 条目。"""
 
     word: str
     lemma: str
@@ -113,7 +112,7 @@ class VocabItem:
 
 
 class VocabBank:
-    """Build and query a frequency-ranked English lemma-family vocabulary bank."""
+    """构建并查询按频率 rank 排序的英语 lemma-family 词库。"""
 
     def __init__(
         self,
@@ -134,15 +133,15 @@ class VocabBank:
         self.used_fallback = words_with_ranks is None and not self._wordfreq_available
 
     def _load_ranked_words(self) -> list[tuple[str, int]]:
-        """Return ranked word forms from wordfreq or the built-in fallback.
-        Uses pickle cache to avoid re-loading the 200MB wordfreq dictionary on restart."""
+        """返回来自 wordfreq 或内置 fallback 的带 rank 词形。
+        使用 pickle cache，避免重启时重复加载 200MB 的 wordfreq 字典。"""
 
         import pickle as _pickle
         import time as _time
 
         cache_path = Path("/tmp/vocab_bank_words.pkl")
         
-        # Try pickle cache first
+        # 优先尝试 pickle cache
         if cache_path.exists():
             try:
                 t0 = _time.time()
@@ -163,7 +162,7 @@ class VocabBank:
             result = [(word, rank) for rank, word in enumerate(words, start=1)]
             print(f"  wordfreq loaded {len(result)} words in {_time.time()-t0:.1f}s")
             
-            # Save to cache
+            # 保存到 cache
             try:
                 with open(cache_path, "wb") as f:
                     _pickle.dump(result, f)
@@ -177,7 +176,7 @@ class VocabBank:
             return self._fallback_words()
 
     def _fallback_words(self) -> list[tuple[str, int]]:
-        """Return a small manually curated frequency list with synthetic ranks."""
+        """返回一个小型人工整理频率列表，并附带合成 rank。"""
 
         seen: set[str] = set()
         unique_words: list[str] = []
@@ -195,7 +194,7 @@ class VocabBank:
         return ranked
 
     def _build_items(self, words_with_ranks: Iterable[tuple[str, int]]) -> list[VocabItem]:
-        """Filter, lemmatize and bucket ranked words."""
+        """过滤、lemmatize 并将带 rank 的词放入 bucket。"""
 
         best_by_lemma: dict[str, tuple[str, int]] = {}
         for raw_word, raw_rank in words_with_ranks:
@@ -221,7 +220,7 @@ class VocabBank:
         return items
 
     def _passes_filter(self, word: str) -> bool:
-        """Return True for normal English lexical words."""
+        """对普通英语词汇项返回 True。"""
 
         if len(word) < self.config.min_word_len:
             return False
@@ -240,7 +239,7 @@ class VocabBank:
         return buckets
 
     def bucket_for_rank(self, rank: int) -> str | None:
-        """Return bucket label for a frequency rank, or None if out of range."""
+        """返回频率 rank 对应的 bucket 标签；超出范围则返回 None。"""
 
         for boundary in self.config.bucket_boundaries:
             if rank <= boundary:
@@ -248,24 +247,24 @@ class VocabBank:
         return None
 
     def get_words_in_bucket(self, bucket: str | int) -> list[str]:
-        """Return representative words in a bucket.
+        """返回某个 bucket 中的代表词。
 
         Args:
-            bucket: Either a compact label such as ``"5k"`` or a numeric upper
-                boundary such as ``5000``.
+            bucket: 可以是 ``"5k"`` 这样的紧凑标签，也可以是 ``5000``
+                这样的数值上界。
         """
 
         label = bucket_label(bucket) if isinstance(bucket, int) else bucket.lower()
         return [item.word for item in self.words_by_bucket.get(label, [])]
 
     def get_items_in_bucket(self, bucket: str | int) -> list[VocabItem]:
-        """Return full bank entries in a bucket."""
+        """返回某个 bucket 中的完整词库条目。"""
 
         label = bucket_label(bucket) if isinstance(bucket, int) else bucket.lower()
         return list(self.words_by_bucket.get(label, []))
 
     def get_rank(self, word: str) -> int | None:
-        """Return the frequency rank for ``word`` or its lemma."""
+        """返回 ``word`` 或其 lemma 的频率 rank。"""
 
         raw = word.strip()
         if not raw:
@@ -277,18 +276,18 @@ class VocabBank:
         return self.rank_by_lemma.get(lemma.lower(), self.rank_by_word.get(lemma.lower()))
 
     def get_bucket(self, word: str) -> str | None:
-        """Return the frequency bucket for ``word`` if present in the bank."""
+        """若 ``word`` 存在于词库中，返回其频率 bucket。"""
 
         rank = self.get_rank(word)
         return self.bucket_for_rank(rank) if rank is not None else None
 
     def bucket_sizes(self) -> dict[str, int]:
-        """Return the number of lemma-family entries in every bucket."""
+        """返回每个 bucket 中 lemma-family 条目的数量。"""
 
         return {label: len(items) for label, items in self.words_by_bucket.items()}
 
     def ranks(self) -> list[int]:
-        """Return all retained lemma-family ranks."""
+        """返回所有保留下来的 lemma-family ranks。"""
 
         return [item.rank for item in self.items]
 

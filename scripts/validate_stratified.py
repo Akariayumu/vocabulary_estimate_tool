@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Validate the stratified v2 quiz with 3 simulated user profiles.
+"""使用 3 个模拟用户画像验证分层 v2 测验。
 
-Users are simulated using the Rasch model itself:
+用户由 Rasch model 本身模拟：
   P(word known) = sigmoid(θ_user - logit(difficulty))
 
-This creates realistic graded responses (not hard thresholds).
+这会生成真实感更强的渐变 responses（不是硬阈值）。
 """
 
 from __future__ import annotations
@@ -40,25 +40,25 @@ def simulate_rasch_user(
     true_theta: float,
     seed: int = 42,
 ) -> dict:
-    """Run the full v2 pipeline for a Rasch-simulated user.
+    """为 Rasch 模拟用户运行完整 v2 流程。
 
-    The user's responses are generated as:
+    用户 responses 按如下方式生成：
         P(known | word_j) = σ(true_theta - logit(difficulty_j))
 
     Args:
-        name: User label.
-        true_theta: The "true" ability θ used to generate responses.
-        seed: Random seed for reproducibility.
+        name: 用户标签。
+        true_theta: 用于生成 responses 的“真实”能力 θ。
+        seed: 用于复现的随机种子。
 
     Returns:
-        dict with theta estimates, vocabulary estimates, and diagnostics.
+        包含 theta 估计、词汇量估计和诊断信息的 dict。
     """
     np.random.seed(seed)
     rng = np.random.RandomState(seed)
     bank = VocabBank(DEFAULT_CONFIG)
     sq = StratifiedQuiz(bank)
 
-    # ── Phase 1 ──────────────────────────────────────────────────────────
+    # ── Phase 1 阶段 ────────────────────────────────────────────────────
     phase1 = sq.phase1_sample(adaptive=True)
     responses_phase1: list[tuple[str, bool]] = []
     for item in phase1:
@@ -70,11 +70,11 @@ def simulate_rasch_user(
     phase1_correct = sum(r[1] for r in responses_phase1)
     phase1_rate = phase1_correct / len(phase1)
 
-    # ── Fit θ from Phase 1 ──────────────────────────────────────────────
+    # ── 从 Phase 1 拟合 θ ─────────────────────────────────────────────
     theta1, ci1 = sq.fit_ability(responses_phase1)
     est1 = sq.estimate_with_ci(responses_phase1)
 
-    # ── Phase 2 ──────────────────────────────────────────────────────────
+    # ── Phase 2 阶段 ────────────────────────────────────────────────────
     low_conf = sq._identify_low_confidence(responses_phase1)
     phase2 = sq.phase2_sample(theta1, low_confidence_classes=low_conf, responses=responses_phase1)
     responses_phase2: list[tuple[str, bool]] = []
@@ -86,18 +86,18 @@ def simulate_rasch_user(
 
     phase2_correct = sum(r[1] for r in responses_phase2)
 
-    # ── Combined fit ────────────────────────────────────────────────────
+    # ── 合并拟合 ─────────────────────────────────────────────────────
     all_responses = responses_phase1 + responses_phase2
     theta2, ci2 = sq.fit_ability(all_responses)
     est2 = sq.estimate_with_ci(all_responses)
 
-    # ── Expected vocabulary (theoretical) ───────────────────────────────
+    # ── 期望词汇量（理论值）──────────────────────────────────────────
     expected_vocab = sum(
         _sigmoid(true_theta - _logit(max(0.001, min(0.999, d))))
         for d in sq._word_difficulties.values()
     )
 
-    # ── Per-class stats ─────────────────────────────────────────────────
+    # ── 每类统计 ───────────────────────────────────────────────────
     from collections import defaultdict
     class_stats: dict[int, dict] = {}
     class_counts: dict[int, list[bool]] = defaultdict(list)
@@ -142,8 +142,8 @@ def main():
     print("  Stratified v2 Quiz — Rasch-based Simulation")
     print("=" * 80)
 
-    # Three user profiles using Rasch θ
-    # θ ≈ -2 → ~初中 level; θ ≈ 0 → ~CET-4; θ ≈ 2 → ~CET-6/proficient
+    # 使用 Rasch θ 的三个用户画像
+    # θ ≈ -2 → 约初中 level；θ ≈ 0 → 约 CET-4；θ ≈ 2 → 约 CET-6/proficient
     users = [
         ("初中水平  (θ=-1.5)", -1.5, 101),
         ("四级水平    (θ=0.0)", 0.0, 102),
@@ -177,7 +177,7 @@ def main():
         print(f"    Expected  : {result['expected_vocab']}  "
               f"(theoretical vocab for true θ={result['true_theta']})")
 
-        # Diagnostic
+        # 诊断
         theta_err = abs(result['theta_phase2'] - result['true_theta'])
         vocab_err = abs(result['estimate_phase2'] - result['expected_vocab'])
         print(f"    θ error   : {theta_err:.3f}  "
@@ -185,7 +185,7 @@ def main():
         print(f"    Vocab err : {vocab_err}  "
               f"{'✓' if vocab_err < 3000 else '⚠️ large'}")
 
-        # Per-class breakdown
+        # 每类明细
         n_p = len([c for c, s in result["per_class"].items() if s["rate"] >= 0.8])
         n_m = len([c for c, s in result["per_class"].items() if 0.2 < s["rate"] < 0.8])
         n_u = len([c for c, s in result["per_class"].items() if s["rate"] <= 0.2])

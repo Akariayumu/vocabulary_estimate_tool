@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Compare hybrid bisection + CAT vs existing stratified quiz.
+"""比较 hybrid bisection + CAT 与现有分层测验。
 
-Two schemes on the same synthetic users:
-  A) Hybrid: 6× quantile bisection + 34× Fisher-information CAT
-  B) Control: existing 40× stratified + ~8× per low-conf class refine
+在同一组合成用户上比较两种方案：
+  A) Hybrid：6× quantile bisection + 34× Fisher-information CAT
+  B) Control：现有 40× 分层 + 每个低置信类别约 8× 精细化
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from vocab_estimator.stratified_quiz import StratifiedQuiz
 
-# ── Reuse from tests/simulation_eval.py ──────────────────────────────────
+# ── 复用 tests/simulation_eval.py 中的逻辑 ───────────────────────────────
 from tests.simulation_eval import (
     VocabWord,
     SyntheticUser,
@@ -44,9 +44,9 @@ DEFAULT_OUTPUT = PROJECT_ROOT / "outputs" / "hybrid_bisection_validation.json"
 DEFAULT_STAGE_VOCAB = PROJECT_ROOT / "data" / "stage_vocab.json"
 
 
-# ── Quantile anchors (derived from stage_vocab.json) ────────────────────
-# difficulty distribution is strongly right-skewed (mean 0.81, median 0.857)
-# Binary search operates on quantile indices, not raw difficulty
+# ── Quantile anchors（源自 stage_vocab.json）────────────────────────────
+# difficulty 分布明显右偏（mean 0.81，median 0.857）
+# Binary search 操作 quantile indices，而不是 raw difficulty
 QUANTILE_LABELS = ["P5", "P10", "P25", "P50", "P75", "P90", "P95"]
 QUANTILE_DIFFS = [0.4323, 0.5648, 0.7378, 0.8572, 0.9447, 0.9753, 0.9873]
 
@@ -59,7 +59,7 @@ QUANTILE_LOGITS = _logit_diffs(QUANTILE_DIFFS)
 
 
 def _nearest_word(items: list[dict], target_diff: float, exclude: set[str]) -> dict | None:
-    """Pick word with difficulty closest to target, excluding already-seen words."""
+    """选择 difficulty 最接近目标的词，并排除已见词。"""
     best = None
     best_err = float("inf")
     for item in items:
@@ -73,7 +73,7 @@ def _nearest_word(items: list[dict], target_diff: float, exclude: set[str]) -> d
     return best
 
 
-# ── Scheme A: Hybrid bisection + CAT ─────────────────────────────────────
+# ── 方案 A：Hybrid bisection + CAT ─────────────────────────────────────
 
 def run_hybrid_scheme(
     user: SyntheticUser,
@@ -83,7 +83,7 @@ def run_hybrid_scheme(
     total_questions: int = 40,
     bisection_steps: int = 6,
 ) -> tuple[list[tuple[str, bool]], int, int]:
-    """Run scheme A and return (responses, phase1_correct, phase1_total)."""
+    """运行方案 A 并返回 (responses, phase1_correct, phase1_total)。"""
     responses: list[tuple[str, bool]] = []
     seen: set[str] = set()
     response_rng = random.Random(response_rng.randrange(0, 2**32))
@@ -93,9 +93,9 @@ def run_hybrid_scheme(
         p_known = sigmoid(user.true_theta - d_logit)
         return response_rng.random() < p_known
 
-    # ── Phase 1: quantile bisection (bisection_steps questions) ────────
-    lo_idx = 0   # P5 index
-    hi_idx = 6   # P95 index
+    # ── Phase 1：quantile bisection（bisection_steps 道题）──────────────
+    lo_idx = 0   # P5 索引
+    hi_idx = 6   # P95 索引
     phase1_correct = 0
 
     for step in range(bisection_steps):
@@ -103,7 +103,7 @@ def run_hybrid_scheme(
         target_diff = QUANTILE_DIFFS[mid_idx]
         item = _nearest_word(all_candidates, target_diff, seen)
         if item is None:
-            # Fallback: pick any unseen word near mid
+            # fallback：选择任意接近中点的未见词
             remaining = [c for c in all_candidates if c["word"] not in seen]
             if not remaining:
                 break
@@ -121,12 +121,12 @@ def run_hybrid_scheme(
 
     phase1_total = len(responses)
 
-    # ── Phase 2: Fisher-information CAT ─────────────────────────────────
+# ── Phase 2 阶段：Fisher-information CAT ─────────────────────────
     n_remaining = total_questions - bisection_steps
     theta, _ = quiz.fit_ability(responses)
 
     for _ in range(n_remaining):
-        # Score all candidates by Fisher info at current θ
+        # 按当前 θ 下的 Fisher info 为所有候选打分
         best_item = None
         best_info = -1.0
         for c in all_candidates:
@@ -140,7 +140,7 @@ def run_hybrid_scheme(
                 best_item = c
 
         if best_item is None:
-            break  # ran out of words
+            break  # 词已用尽
 
         seen.add(best_item["word"])
         known = answer_item(best_item)
@@ -150,13 +150,13 @@ def run_hybrid_scheme(
     return responses, phase1_correct, phase1_total
 
 
-# ── Scheme B: Existing stratified quiz pipeline ──────────────────────────
+# ── 方案 B：现有分层测验流程 ─────────────────────────────────────
 
 def run_control_scheme(
     user: SyntheticUser,
     quiz: StratifiedQuiz,
 ) -> tuple[list[tuple[str, bool]], int, int]:
-    """Run the existing stratified quiz pipeline."""
+    """运行现有分层测验流程。"""
     sample_rng = random.Random(user.seed)
     response_rng = random.Random(user.seed ^ 0x9E3779B9)
 
@@ -185,7 +185,7 @@ def run_control_scheme(
     return responses, phase1_correct, len(phase1_responses)
 
 
-# ── Main evaluation ──────────────────────────────────────────────────────
+# ── 主评估 ───────────────────────────────────────────────────────
 
 def run_evaluation(
     n_users: int = 500,
@@ -198,7 +198,7 @@ def run_evaluation(
 ) -> dict[str, Any]:
     t0 = time.time()
 
-    # Load data
+    # 加载数据
     vocab_bank = load_vocab_bank()
     all_candidates: list[dict] = []
     wts = json.load(open(DEFAULT_STAGE_VOCAB, encoding="utf-8"))["word_to_stage"]
@@ -226,7 +226,7 @@ def run_evaluation(
     records_b: list[dict] = []
 
     for idx, user in enumerate(users, start=1):
-        # ── Scheme A ────────────────────────────────────────────────────
+        # ── 方案 A ─────────────────────────────────────────────────────
         response_rng_a = random.Random(user.seed ^ 0xDEADBEEF)
         resp_a, p1corr_a, p1tot_a = run_hybrid_scheme(
             user, quiz, response_rng_a, all_candidates,
@@ -235,7 +235,7 @@ def run_evaluation(
         theta_a, ci_a = quiz.fit_ability(resp_a)
         est_a = int(round(_expected_vocab_from_logits(theta_a, difficulty_logits)))
 
-        # Phase 1 only estimate
+        # 仅 Phase 1 估算
         resp_a_p1 = resp_a[:6]
         theta_a_p1, _ = quiz.fit_ability(resp_a_p1)
         est_a_p1 = int(round(_expected_vocab_from_logits(theta_a_p1, difficulty_logits)))
@@ -256,12 +256,12 @@ def run_evaluation(
             "bucket": _bucket_name(user.true_vocab),
         })
 
-        # ── Scheme B ────────────────────────────────────────────────────
+        # ── 方案 B ─────────────────────────────────────────────────────
         resp_b, p1corr_b, p1tot_b = run_control_scheme(user, quiz)
         theta_b, ci_b = quiz.fit_ability(resp_b)
         est_b = int(round(_expected_vocab_from_logits(theta_b, difficulty_logits)))
 
-        # Phase 1 only
+        # 仅 Phase 1
         resp_b_p1_prepared = quiz._prepare_responses(resp_b[:p1tot_b])
         if len(resp_b_p1_prepared) >= 3:
             theta_b_p1, _ = quiz.fit_ability(resp_b[:p1tot_b])
@@ -289,7 +289,7 @@ def run_evaluation(
             elapsed = time.time() - t0
             print(f"  [{idx}/{n_users}] {elapsed:.0f}s elapsed", file=sys.stderr)
 
-    # ── Compute metrics ─────────────────────────────────────────────────
+    # ── 计算指标 ───────────────────────────────────────────────────
     def bucket_results(records):
         buckets = ["low_1k_3k", "mid_3k_8k", "high_8k_15k"]
         out = []
@@ -331,7 +331,7 @@ def run_evaluation(
     elapsed = time.time() - t0
     summary["elapsed_seconds"] = round(elapsed, 1)
 
-    # Write output
+    # 写入输出
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
@@ -345,7 +345,7 @@ def run_evaluation(
 
 
 def print_comparison(summary: dict):
-    """Pretty-print the comparison."""
+    """以易读格式打印对比。"""
     sa = summary["scheme_a"]
     sb = summary["scheme_b"]
 
@@ -405,7 +405,7 @@ def print_comparison(summary: dict):
     p1_b_r2 = sb["overall_p1"]["r2"]
     print(f"  {'R²':>14s}  {p1_a_r2:>10.4f}  {p1_b_r2:>10.4f}  {p1_a_r2 - p1_b_r2:>+10.4f}")
 
-    # Conclusion
+    # 结论
     print("\n" + "-" * 76)
     a_better = sa["overall"]["r2"] > sb["overall"]["r2"]
     r2_delta = abs(sa["overall"]["r2"] - sb["overall"]["r2"])

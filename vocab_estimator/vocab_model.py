@@ -1,4 +1,4 @@
-"""Core vocabulary-size prediction model."""
+"""核心词汇量预测模型。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ Response = tuple[str, bool]
 
 @dataclass(frozen=True)
 class PreparedResponse:
-    """A learner response enriched with rank and bucket metadata."""
+    """带有 rank 和 bucket 元数据的学习者作答。"""
 
     word: str
     known: bool
@@ -27,7 +27,7 @@ class PreparedResponse:
 
 
 class VocabEstimator:
-    """Estimate vocabulary size from stratified word-test responses."""
+    """根据分层词汇测试 responses 估算词汇量。"""
 
     def __init__(
         self,
@@ -40,7 +40,7 @@ class VocabEstimator:
         self.rng = random.Random(config.random_seed if seed is None else seed)
 
     def prepare_responses(self, responses: Iterable[Response]) -> list[PreparedResponse]:
-        """Attach frequency rank and bucket to raw ``(word, known)`` records."""
+        """为原始 ``(word, known)`` 记录附加频率 rank 和 bucket。"""
 
         prepared: list[PreparedResponse] = []
         for word, known in responses:
@@ -54,7 +54,7 @@ class VocabEstimator:
         return prepared
 
     def baseline_estimate(self, responses: Iterable[Response] | list[PreparedResponse]) -> dict:
-        """Estimate V = sum(N_b * p_b), bucket size times known-rate."""
+        """估算 V = sum(N_b * p_b)，即 bucket 大小乘以已知率。"""
 
         prepared = self._ensure_prepared(responses)
         bucket_known: dict[str, list[bool]] = {bucket: [] for bucket in self.vocab_bank.words_by_bucket}
@@ -64,7 +64,7 @@ class VocabEstimator:
         bucket_labels = list(self.vocab_bank.words_by_bucket)
         n_buckets = len(bucket_labels)
 
-        # Beta-smoothed rates per bucket
+        # 每个 bucket 的 Beta-smoothed 已知率
         observed_rates: dict[str, float] = {}
         for bucket, values in bucket_known.items():
             if values:
@@ -101,7 +101,7 @@ class VocabEstimator:
         return {"estimate": total, "bucket_contributions": contributions}
 
     def logistic_estimate(self, responses: Iterable[Response] | list[PreparedResponse]) -> dict:
-        """Fit P(know)=sigmoid(alpha + beta*log(rank)) and sum over the bank."""
+        """拟合 P(know)=sigmoid(alpha + beta*log(rank))，并在词库上求和。"""
 
         prepared = self._ensure_prepared(responses)
         if len(prepared) < 4:
@@ -142,7 +142,7 @@ class VocabEstimator:
         }
 
     def estimate_single(self, responses: Iterable[Response]) -> dict:
-        """Return point estimate, interval, level and confidence for one group."""
+        """返回单个组的点估计、区间、等级和置信度。"""
 
         response_rows = list(responses)
         prepared = self.prepare_responses(response_rows)
@@ -152,12 +152,12 @@ class VocabEstimator:
         if not math.isfinite(point) or point <= 0:
             point = baseline["estimate"]
 
-        # Apply research-based calibration to compress overestimates
+        # 应用基于研究的校准，以压缩过高估计
         raw_point = point
         point = self.calibrate(point)
 
         ci_low, ci_high = self.bootstrap_interval(prepared)
-        # Also calibrate the interval bounds
+        # 同时校准区间边界
         ci_low, ci_high = self.calibrate(ci_low), self.calibrate(ci_high)
         confidence = self.confidence_label(point, ci_low, ci_high)
 
@@ -177,7 +177,7 @@ class VocabEstimator:
         }
 
     def estimate_groups(self, grouped_responses: Mapping[str, Iterable[Response]]) -> dict:
-        """Estimate all learner classes and enforce the C > F > P > K order."""
+        """估算全部学习者班级，并强制满足 C > F > P > K 顺序。"""
 
         raw_results = {
             class_name: self.estimate_single(list(responses))
@@ -205,7 +205,7 @@ class VocabEstimator:
         }
 
     def bootstrap_interval(self, prepared: list[PreparedResponse]) -> tuple[float, float]:
-        """Return a bootstrap confidence interval for the point estimate."""
+        """返回点估计的 bootstrap confidence interval。"""
 
         if not prepared:
             return 0.0, 0.0
@@ -228,7 +228,7 @@ class VocabEstimator:
         return max(0.0, low), min(float(len(self.vocab_bank)), high)
 
     def confidence_label(self, point: float, ci_low: float, ci_high: float) -> str:
-        """Map CI width / estimate to 高, 中 or 低."""
+        """将 CI 宽度 / estimate 映射为高、中或低。"""
 
         if point <= 0:
             return "低"
@@ -240,64 +240,62 @@ class VocabEstimator:
         return "低"
 
     def calibrate(self, estimate: float) -> float:
-        """Apply compression to avoid overestimates.
+        """应用压缩以避免过高估计。
 
-        Two-stage pipeline:
-          1. tanh-based smooth saturation (existing) — anchors around
-             the native-speaker ceiling (~20 kf).
-          2. Optional piecewise linear compression (方案 B) — applies
-             progressively stronger compression in higher bands.
+        两阶段流程：
+          1. 基于 tanh 的平滑饱和（现有流程）— 锚定在母语者上限附近（约 20 kf）。
+          2. 可选分段线性压缩（方案 B）— 在更高区间逐步加强压缩。
 
-        Published vocabulary-size data: educated native speakers command
-        ~20,000 word families (Nation 2006; Goulden et al. 1990).
-        Chinese EFL learners top out around 10,000-13,000 (TEM-8 level).
+        公开词汇量数据：受教育母语者掌握约 20,000 个 word families
+        （Nation 2006；Goulden et al. 1990）。中国 EFL 学习者上限约
+        10,000-13,000（TEM-8 水平）。
         """
 
         if estimate <= 0:
             return estimate
 
         cfg = self.config
-        # ---- Stage 1: tanh smooth saturation ----
+        # ---- 阶段 1：tanh 平滑饱和 ----
         max_v = float(cfg.calibration_native_max)
         k = cfg.calibration_k
         calibrated = max_v * math.tanh(k * estimate)
-        # For estimates above ~6,000 this compresses progressively.
-        # For estimates below ~4,000 the curve is near-linear.
+        # 对约 6,000 以上的估算逐渐压缩。
+        # 对约 4,000 以下的估算，曲线接近线性。
 
-        # ---- Stage 2: piecewise linear compression ----
+        # ---- 阶段 2：分段线性压缩 ----
         if cfg.enable_piecewise_calibration:
             calibrated = self.piecewise_calibrate(calibrated)
 
         return float(calibrated)
 
     def piecewise_calibrate(self, estimate: float) -> float:
-        """Apply piecewise linear compression (方案 B).
+        """应用分段线性压缩（方案 B）。
 
-        Segments come from config.piecewise_knots.
-        Current: [0,3.5k] slope 1.00, [3.5k,6.5k] slope 0.55,
+        分段来自 config.piecewise_knots。
+        当前：[0,3.5k] slope 1.00，[3.5k,6.5k] slope 0.55，
         [6.5k,12k] slope 0.30, [12k,22k] slope 0.15, >22k slope 0.15.
 
-        Designed so that a user with raw~11.4k → final~6.3k.
+        设计目标：raw~11.4k 的用户最终约为 ~6.3k。
         """
         if estimate <= 0:
             return estimate
 
-        knots = self.config.piecewise_knots  # sorted (upper_boundary, slope)
+        knots = self.config.piecewise_knots  # 已排序的 (upper_boundary, slope)
         prev_boundary = 0.0
         prev_value = 0.0
 
         for boundary, slope in knots:
             if estimate <= boundary:
                 return float(prev_value + (estimate - prev_boundary) * slope)
-            # Accumulate through this segment
+            # 累加经过该分段后的值
             prev_value += (float(boundary) - prev_boundary) * slope
             prev_boundary = float(boundary)
 
-        # Beyond the last knot — continue with the final segment's slope
+        # 超过最后一个 knot 后，继续使用最后一个分段的 slope
         return float(prev_value + (estimate - prev_boundary) * knots[-1][1])
 
     def map_level(self, estimate: float) -> str:
-        """Map a vocabulary-size estimate to a Chinese learner level."""
+        """将词汇量估算映射到中国学习者等级。"""
 
         thresholds = []
         for name, low, high in self.config.levels:
@@ -321,10 +319,10 @@ class VocabEstimator:
         return thresholds[-1][0]
 
     def enforce_order(self, estimates: list[float]) -> list[float]:
-        """Apply isotonic regression to enforce C ≥ F ≥ P ≥ K.
+        """应用 isotonic regression 以强制满足 C ≥ F ≥ P ≥ K。
 
-        Uses PAVA (pool-adjacent-violators algorithm) when sklearn is
-        available; falls back to a simple greedy fix.
+        sklearn 可用时使用 PAVA（pool-adjacent-violators algorithm）；
+        否则回退到简单贪心修正。
         """
 
         if len(estimates) <= 1:
@@ -339,7 +337,7 @@ class VocabEstimator:
             return self._pava_decreasing(estimates)
 
     def _fit_logistic(self, log_ranks: np.ndarray, y: np.ndarray) -> tuple[float, float]:
-        """Fit logistic regression using sklearn when available, else NumPy GD."""
+        """优先使用 sklearn 拟合 logistic regression，否则使用 NumPy GD。"""
 
         try:
             from sklearn.linear_model import LogisticRegression
@@ -374,21 +372,18 @@ class VocabEstimator:
         ranks: np.ndarray,
         y: np.ndarray,
     ) -> tuple[float, float]:
-        """Fit a *rank-weighted* logistic regression.
+        """拟合 *rank-weighted* logistic regression。
 
-        Samples are weighted by ``_compute_weight(rank)`` so that errors on
-        high-frequency (low-rank) words are penalised more heavily than errors
-        on rare words.  This yields a more conservative vocabulary-size
-        estimate than the unweighted fit.
+        样本按 ``_compute_weight(rank)`` 加权，使高频（低 rank）词上的错误
+        比罕见词上的错误受到更强惩罚。相比未加权拟合，这会得到更保守的词汇量估算。
 
-        Attempts sklearn with ``sample_weight`` first; falls back to a
-        weighted NumPy gradient descent.
+        优先尝试带 ``sample_weight`` 的 sklearn；失败则回退到加权 NumPy gradient descent。
         """
         sample_weights = np.array(
             [self._compute_weight(float(r)) for r in ranks],
             dtype=float,
         )
-        # ---- try sklearn ----
+        # ---- 尝试 sklearn ----
         try:
             from sklearn.linear_model import LogisticRegression
 
@@ -402,7 +397,7 @@ class VocabEstimator:
         except Exception:
             pass
 
-        # ---- weighted NumPy GD ----
+        # ---- 加权 NumPy GD ----
         mean = float(np.mean(log_ranks))
         std = float(np.std(log_ranks) or 1.0)
         z = (log_ranks - mean) / std
@@ -412,7 +407,7 @@ class VocabEstimator:
         for _ in range(self.config.logistic_max_iter):
             logits = design @ weights
             p = self._sigmoid(logits)
-            # Weighted gradient: each sample contributes w_i * (p_i - y_i)
+            # 加权 gradient：每个样本贡献 w_i * (p_i - y_i)
             grad = design.T @ (sample_weights * (p - y)) / len(y)
             grad[1] += self.config.logistic_l2 * weights[1] / len(y)
             weights -= self.config.logistic_lr * grad
@@ -428,16 +423,15 @@ class VocabEstimator:
 
     @staticmethod
     def _compute_weight(rank: float) -> float:
-        """Compute per-sample weight based on frequency rank.
+        """根据频率 rank 计算每个样本的权重。
 
-        High-frequency (low-rank) words that are answered incorrectly get full
-        weight (strongest penalty).  Low-frequency (high-rank) words get
-        progressively less weight, so the fit focuses on common vocabulary.
+        高频（低 rank）词若答错会获得完整权重（最强惩罚）。
+        低频（高 rank）词权重逐步降低，使拟合聚焦于常见词汇。
 
-        Formula:  w = 1 / (1 + log2(max(rank, 10) / 10))
+        公式：w = 1 / (1 + log2(max(rank, 10) / 10))
 
-        Expected values (clamped):
-            rank=1   → w=1.000   (truncated to min rank=10)
+        预期值（clamped）：
+            rank=1   → w=1.000   （截断到最小 rank=10）
             rank=5000  → w≈0.100
             rank=20000 → w≈0.083
         """
@@ -446,7 +440,7 @@ class VocabEstimator:
 
     @staticmethod
     def _pava_decreasing(values: list[float]) -> list[float]:
-        """Pool-adjacent-violators algorithm for non-increasing sequences."""
+        """用于非递增序列的 pool-adjacent-violators algorithm。"""
 
         blocks = [{"sum": float(v), "weight": 1.0, "start": i, "end": i} for i, v in enumerate(values)]
         i = 0
@@ -477,7 +471,7 @@ class VocabEstimator:
         global_rate: float,
     ) -> float:
         if not observed_rates:
-            # No observations at all → use the Bayesian prior for this bucket
+            # 完全没有观测时，使用该 bucket 的 Bayesian prior
             labels = list(self.vocab_bank.words_by_bucket)
             idx = labels.index(bucket)
             alpha, beta = bucket_beta_prior(idx, len(labels), self.config)

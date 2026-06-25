@@ -1,2 +1,2 @@
-"""FastAPI server package for the vocabulary estimator project."""
+"""词汇量估算项目的 FastAPI server 包。"""
 

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Search calibration parameters for the v2 clustered stage vocabulary.
+"""为 v2 clustered stage vocabulary 搜索校准参数。
 
-This script deliberately does not modify ``vocab_estimator/stratified_quiz.py``.
-It reuses the synthetic quiz simulator, caches each user's fitted ``theta`` and
-unscaled ``raw_sum``, then evaluates alternative calibration functions against
-the same simulated response set.
+此脚本有意不修改 ``vocab_estimator/stratified_quiz.py``。
+它复用合成测验模拟器，缓存每个用户拟合得到的 ``theta`` 和未缩放 ``raw_sum``，
+然后在同一模拟 response 集上评估候选校准函数。
 """
 
 from __future__ import annotations
@@ -55,7 +54,7 @@ class SimRecord:
 
 
 def piecewise_calibrate(estimate: float, config: EstimatorConfig = DEFAULT_CONFIG) -> float:
-    """Mirror StratifiedQuiz._piecewise_calibrate without touching the class."""
+    """镜像 StratifiedQuiz._piecewise_calibrate，但不改动类。"""
     if estimate <= 0:
         return estimate
 
@@ -72,7 +71,7 @@ def piecewise_calibrate(estimate: float, config: EstimatorConfig = DEFAULT_CONFI
 
 
 def tanh_piecewise_calibrate(estimate: float, config: EstimatorConfig = DEFAULT_CONFIG) -> float:
-    """Mirror StratifiedQuiz._calibrate."""
+    """镜像 StratifiedQuiz._calibrate。"""
     if estimate <= 0:
         return estimate
 

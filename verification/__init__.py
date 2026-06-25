@@ -1,2 +1,2 @@
-"""Verification utilities for estimator experiments and browser comparison."""
+"""用于估算器实验和浏览器对比的验证工具。"""
 

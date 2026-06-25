@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train calibration: analyze model fit vs synthetic data."""
+"""训练校准：分析模型拟合与合成数据的差异。"""
 import sys, json, math
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,12 +10,12 @@ from vocab_estimator.vocab_model import VocabEstimator
 
 bank = VocabBank(EstimatorConfig())
 
-# ── Load data ──
+# ── 加载数据 ──
 with open("test_samples_trainer.json") as f:
     raw = json.load(f)
 users = raw["users"]
 
-# Aggregate by vocab level
+# 按词汇量等级聚合
 by_level = {}
 for u in users:
     v = u["vocab_size"]
@@ -29,7 +29,7 @@ print(f"{'Vocab':>8} {'RawLog':>8} {'Pred':>8} {'Err':>8}")
 print("-" * 35)
 
 estimator = VocabEstimator(bank, EstimatorConfig())
-for v in levels[::10]:  # every 10th level
+for v in levels[::10]:  # 每隔 10 个等级
     resp = [(r["word"], r["known"]) for r in by_level[v][0]]
     r = estimator.estimate_single(resp)
     print(f"{v:>8} {r['raw_estimate']:>8} {r['point_estimate']:>8} {r['point_estimate']-v:>+8}")
@@ -40,7 +40,7 @@ print("Real learners have SMOOTH decay across buckets.")
 print("The logistic model expects smooth decay - hence misfit.")
 print(f"{'='*50}")
 
-# ── Better synthetic data: use logistic model itself ──
+# ── 更好的合成数据：使用 logistic model 本身 ──
 print(f"\nBetter approach: generate data USING the model:")
 print(f"1. Pick true_vocab_size V")
 print(f"2. Use current model to estimate P(known|rank) for each rank")

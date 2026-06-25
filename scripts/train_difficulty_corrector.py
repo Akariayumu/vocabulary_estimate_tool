@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Train MLP residual corrector for word difficulty (方案 B).
+"""训练词汇 difficulty 的 MLP residual corrector（方案 B）。
 
-Supports GPU (CUDA) training on V100.  Falls back to CPU gracefully.
+支持在 V100 上进行 GPU（CUDA）训练；不可用时平滑回退到 CPU。
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _count_syllables(word: str) -> int:
-    """Rough syllable count by vowel-group heuristic."""
+    """基于元音组启发式粗略统计音节数。"""
     word = word.lower().strip()
     if not word:
         return 1
@@ -77,9 +77,9 @@ def build_features(
     max_syllables: int = 12,
     max_word_len: int = 40,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Build feature matrix and target vector.
+    """构建特征矩阵和目标向量。
 
-    Features per word: precomputed embeddings (from npy/index) + baseline difficulty.
+    每个词的特征：预计算 embeddings（来自 npy/index）+ baseline difficulty。
     """
     n = len(words)
     features_list: list[np.ndarray] = []
@@ -97,7 +97,7 @@ def build_features(
 
     X = np.stack(features_list, axis=0).astype(np.float32)
     y = np.array(difficulties, dtype=np.float32)
-    return X, y  # model learns residual between embedding-based prediction and baseline
+    return X, y  # 模型学习 embedding-based prediction 与 baseline 之间的 residual
 
 
 def train(
@@ -105,7 +105,7 @@ def train(
     y: np.ndarray,
     args: argparse.Namespace,
 ) -> tuple[Any, dict[str, float]]:
-    """Train the MLP corrector.
+    """训练 MLP corrector。
 
     Returns:
         (model, stats)
@@ -120,7 +120,7 @@ def train(
         print("Or run on V100 with the yolov5 conda env.")
         sys.exit(1)
 
-    # Device
+    # 设备
     if args.device:
         device = torch.device(args.device)
     else:
@@ -131,7 +131,7 @@ def train(
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
         print(f"  Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
 
-    # Split
+    # 划分
     n = len(X)
     indices = np.random.RandomState(args.seed).permutation(n)
     n_train = int(n * 0.8)
@@ -149,7 +149,7 @@ def train(
 
     input_dim = X.shape[1]
 
-    # Model
+    # 模型
     class DifficultyCorrector(nn.Module):
         def __init__(self, input_dim: int, h1: int, h2: int, dropout: float):
             super().__init__()
@@ -175,7 +175,7 @@ def train(
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-    # Training
+    # 训练
     best_val_loss = float("inf")
     patience_counter = 0
     best_state: dict | None = None
@@ -192,7 +192,7 @@ def train(
             loss.backward()
             optimizer.step()
 
-        # Validation
+        # 验证
         model.eval()
         with torch.no_grad():
             val_pred = model(X_val)
@@ -204,7 +204,7 @@ def train(
         if epoch % 20 == 0 or epoch == 1:
             print(f"  epoch {epoch:4d}: train_loss={train_loss:.6f} val_loss={val_loss:.6f}")
 
-        # Early stopping
+        # 早停
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_counter = 0
@@ -217,18 +217,18 @@ def train(
 
     elapsed = time.time() - t0
 
-    # Restore best model
+    # 恢复最佳模型
     if best_state:
         model.load_state_dict({k: v.to(device) for k, v in best_state.items()})
 
-    # Test
+    # 测试
     model.eval()
     with torch.no_grad():
         test_pred = model(X_test)
         test_loss = criterion(test_pred, y_test).item()
         test_mae = nn.L1Loss()(test_pred, y_test).item()
 
-        # Compute residuals
+        # 计算 residuals
         residuals = (test_pred - y_test).cpu().numpy()
         residual_std = float(np.std(residuals))
         residual_mean = float(np.mean(residuals))
@@ -267,7 +267,7 @@ def apply_correction(
     difficulties: list[float],
     args: argparse.Namespace,
 ) -> np.ndarray:
-    """Apply MLP residual correction to all words."""
+    """对所有词应用 MLP residual correction。"""
     import torch
     device = next(model.parameters()).device
     model.eval()
@@ -283,7 +283,7 @@ def apply_correction(
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    # Load data
+    # 加载数据
     print("Loading data ...")
     with open(args.stage_vocab, encoding="utf-8") as f:
         sv_data = json.load(f)
@@ -292,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     words = list(word_to_stage.keys())
     difficulties = [word_to_stage[w]["difficulty"] for w in words]
 
-    # Load embeddings
+    # 加载 embeddings
     embeddings = np.load(args.embedding_npy)
     with open(args.embedding_index) as f:
         word_to_idx = json.load(f)
@@ -301,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Words: {len(words)} (embedding match: {n_found})")
     print(f"  Embedding matrix: {embeddings.shape}")
 
-    # Build features
+    # 构建 features
     X, y = build_features(words, embeddings, word_to_idx, difficulties)
 
     if args.dry_run:
@@ -313,10 +313,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  Difficulty mean: {y.mean():.4f}  std: {y.std():.4f}")
         return 0
 
-    # Train
+    # 训练
     model, stats = train(X, y, args)
 
-    # Save model
+    # 保存模型
     import torch
     torch.save({
         "model_state_dict": model.state_dict(),
@@ -328,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     }, args.output_model)
     print(f"Saved model: {args.output_model}")
 
-    # Apply correction and save enhanced vocab
+    # 应用 correction 并保存 enhanced vocab
     corrected = apply_correction(model, X, difficulties, args)
 
     corrections_made = int(np.sum(np.abs(corrected - np.array(difficulties)) > 0.01))

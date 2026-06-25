@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Expand stage_vocab.json with missing academic/high-value words from exam wordlists."""
+"""用考试词表中缺失的学术/高价值词扩展 stage_vocab.json。"""
 
 import json, re, bisect, sys
 from pathlib import Path
@@ -19,7 +19,7 @@ STAGE_NAMES = {1:"primary_3",2:"primary_4",3:"primary_5",4:"primary_6",
                5:"junior_7",6:"junior_8",7:"junior_9",8:"senior",
                9:"cet4",10:"cet6",11:"ielts"}
 
-# Modern high-value domain words (tech, academic, environmental, etc.)
+# 现代高价值领域词（技术、学术、环境等）
 MODERN_HIGH_VALUE = {
     "algorithmic","blockchain","cryptocurrency","societal","geopolitical",
     "epistemological","epistemology","hegemony","governance","mitigation",
@@ -46,14 +46,14 @@ MODERN_HIGH_VALUE = {
     "machine-learning","natural-language","cross-cultural",
     "decision-making","problem-solving","goal-oriented",
     "collaboration","collaborative","participatory",
-    # C.txt specific
+    # C.txt 专用
     "inadvertently","multifaceted","accountability","systemic",
     "unprecedented","profound","detrimental","stringent",
     "promulgate","exacerbate","marginalize","marginalization",
 }
 
 def load_vocab_dict(path: Path) -> dict[str, int]:
-    """Load wordlist: word -> rank (1-based line number). Accepts alpha + hyphenated."""
+    """加载词表：word -> rank（从 1 开始的行号）。接受字母和连字符词。"""
     result = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         raw = (line.strip().split()[0] if line.strip() else "").lower().strip()
@@ -95,7 +95,7 @@ def main():
     existing = set(base["word_to_stage"].keys())
     print(f"  Existing words: {len(existing)}")
 
-    # Load wordlists with rank
+    # 加载带 rank 的词表
     print("Loading exam wordlists...")
     coca = load_vocab_dict(COCA_PATH)
     toefl = load_vocab_dict(TOEFL_PATH)
@@ -105,24 +105,24 @@ def main():
     gre_set = set(gre.keys())
     print(f"  COCA: {len(coca_set)}, TOEFL: {len(toefl_set)}, GRE: {len(gre_set)}")
 
-    # Missing words
+    # 缺失词
     missing_coca = coca_set - existing
     missing_toefl = toefl_set - existing
     missing_gre = gre_set - existing
     print(f"  Missing COCA: {len(missing_coca)}, TOEFL: {len(missing_toefl)}, GRE: {len(missing_gre)}")
 
-    # Filter noise from COCA
+    # 过滤 COCA 噪声
     coca_candidates = {w for w in missing_coca if not is_noise(w)}
-    # Remove proper-noun-like words from COCA
+    # 从 COCA 中移除疑似专有名词
     coca_pn = {w for w in coca_candidates if has_uppercase(w)}
     coca_candidates -= coca_pn
     print(f"\nCOCA candidates after filter: {len(coca_candidates)} (removed noise: {len(missing_coca)-len(coca_candidates)-len(coca_pn)}, proper: {len(coca_pn)})")
 
-    # Filter noise from TOEFL - most should be kept
+    # 过滤 TOEFL 噪声，大部分应保留
     toefl_candidates = {w for w in missing_toefl if not is_noise(w)}
     print(f"TOEFL candidates: {len(toefl_candidates)}")
 
-    # GRE: only keep words in COCA, TOEFL, or modern high-value
+    # GRE：只保留出现在 COCA、TOEFL 或现代高价值词中的词
     gre_candidates = set()
     for w in missing_gre:
         if is_noise(w):
@@ -131,15 +131,15 @@ def main():
             gre_candidates.add(w)
     print(f"GRE candidates: {len(gre_candidates)} (filtered: {len(missing_gre)-len(gre_candidates)})")
 
-    # Modern high-value not already covered
+    # 尚未覆盖的现代高价值词
     modern_add = MODERN_HIGH_VALUE - existing - coca_candidates - toefl_candidates - gre_candidates
     print(f"Modern high-value not yet covered: {len(modern_add)}")
 
-    # Merge
+    # 合并
     all_candidates = coca_candidates | toefl_candidates | gre_candidates | modern_add
     print(f"Total candidates: {len(all_candidates)}")
 
-    # Build new entries
+    # 构建新条目
     new_entries = {}
     src_stats = {}
 
@@ -152,7 +152,7 @@ def main():
         in_gre = word in gre_set
         in_modern = word in MODERN_HIGH_VALUE
 
-        # Determine priority
+        # 确定 priority
         if in_toefl:
             priority = 9.5
         elif in_gre:
@@ -162,7 +162,7 @@ def main():
         else:
             priority = estimate_priority_from_rank(rank)
 
-        # Determine sources label
+        # 确定 sources 标签
         src_parts = []
         if in_toefl: src_parts.append("toefl")
         if in_gre: src_parts.append("gre")
@@ -183,14 +183,14 @@ def main():
         norm_priority = (priority - 1) / 10.0
         difficulty = compute_difficulty(norm_priority, norm_rank)
 
-        # Apply difficulty boost for new words (they should be harder than core vocab)
+        # 为新词应用 difficulty 提升（它们应比核心词汇更难）
         boost = 0.0
         if in_toefl or in_gre or in_modern:
-            boost = 0.12  # TOEFL/GRE/modern words are genuinely harder
+            boost = 0.12  # TOEFL/GRE/现代词确实更难
         elif in_coca and rank < 10000:
-            boost = 0.06  # less frequent COCA words still moderate
+            boost = 0.06  # 较低频 COCA 词仍属中等难度
         elif in_coca:
-            boost = 0.10  # rarer COCA words
+            boost = 0.10  # 更罕见的 COCA 词
         difficulty = min(0.99, round(difficulty + boost, 4))
 
         new_entries[word] = {
@@ -201,7 +201,7 @@ def main():
             "difficulty": difficulty,
         }
 
-    # Build enhanced
+    # 构建 enhanced 数据
     enhanced = {
         "meta": {**base["meta"]},
         "stages": {**base["stages"]},
@@ -218,7 +218,7 @@ def main():
     for word, info in new_entries.items():
         enhanced["word_to_stage"][word] = info
 
-    # Recompute clusters
+    # 重新计算 clusters
     all_diffs = sorted([float(v["difficulty"]) for v in enhanced["word_to_stage"].values() if v.get("difficulty") is not None])
     n_words = len(all_diffs)
 
@@ -232,12 +232,12 @@ def main():
             v["cluster_20"] = cluster_of(float(v["difficulty"]), 20)
             v["cluster_100"] = cluster_of(float(v["difficulty"]), 100)
 
-    # Save
+    # 保存
     OUTPUT_PATH.write_text(json.dumps(enhanced, ensure_ascii=False, indent=2), encoding="utf-8")
     total_after = len(enhanced["word_to_stage"])
     print(f"\nSaved enhanced vocab: {total_after} words (+{total_after-len(existing)})")
 
-    # === Run article estimation comparison ===
+    # === 运行文章估算对比 ===
     print("\nRunning article estimation comparison...")
     sys.path.insert(0, str(PROJECT_ROOT))
     from vocab_estimator.article_estimator import estimate_article as est_art
@@ -258,7 +258,7 @@ def main():
         re_ = est_art(text, stage_vocab_path=str(OUTPUT_PATH))
         results[label] = {"base": rb, "enh": re_}
 
-    # === Write report ===
+    # === 写入报告 ===
     report_lines = []
     report_lines.append("# 词库扩展结果报告\n")
     report_lines.append("## 概览\n")

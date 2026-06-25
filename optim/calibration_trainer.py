@@ -1,18 +1,17 @@
-"""Gradient-descent based calibration parameter trainer.
+"""基于 gradient descent 的校准参数训练器。
 
-Train the global parameters (β, calibration_k, piecewise_knots) from
-observed user response data, replacing hand-tuned empirical values.
+从观测用户 response 数据训练全局参数（β、calibration_k、piecewise_knots），
+替换手工调节的经验值。
 
-Implements the *interval-sampling + official-vocab-anchoring* design:
+实现 *interval-sampling + official-vocab-anchoring* 设计：
   - Interval group known-rate loss (L_interval)
   - Official exam vocabulary coverage loss (L_official)
   - Smoothness regularisation (L_smooth)
 
-Usage
+用法
 -----
     python -m optim.calibration_trainer --data calibration_dataset.json
-    python -m optim.calibration_trainer --dry-run    # print sampling / param structure
-"""
+    python -m optim.calibration_trainer --dry-run    # 打印 sampling / 参数结构"""
 
 from __future__ import annotations
 
@@ -25,7 +24,7 @@ from typing import Any
 
 import numpy as np
 
-# Import project modules
+# 导入项目模块
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from vocab_estimator.config import DEFAULT_CONFIG, EstimatorConfig
 from vocab_estimator.vocab_bank import VocabBank
@@ -33,7 +32,7 @@ from vocab_estimator.vocab_bank import VocabBank
 
 @dataclass
 class CalibrationParameters:
-    """Trained parameter set ready for config injection."""
+    """已训练、可注入 config 的参数集。"""
 
     beta: float = -0.30
     calibration_k: float = 0.0000691
@@ -42,7 +41,7 @@ class CalibrationParameters:
     )
     training_loss: float = 0.0
     n_epochs: int = 0
-    # ── New loss components (interval redesign) ──
+    # ── 新 loss 组件（interval redesign）──
     loss_interval: float = 0.0
     loss_official: float = 0.0
     loss_smooth: float = 0.0
@@ -59,24 +58,23 @@ class CalibrationParameters:
 
 @dataclass
 class UserBucketStats:
-    """Aggregated per-bucket observations for one user."""
+    """单个用户的按 bucket 聚合观测。"""
 
     user_id: int
-    alpha: float = 0.0          # fitted per-user intercept
+    alpha: float = 0.0          # 已拟合的每用户 intercept
     bucket_rates: dict[str, float] = field(default_factory=dict)
     bucket_counts: dict[str, int] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
-# Data loading & aggregation
+# 数据加载与聚合
 # ---------------------------------------------------------------------------
 
 def load_responses(path: str) -> dict[int, list[tuple[str, bool]]]:
-    """Load calibration dataset from JSON.
+    """从 JSON 加载校准数据集。
 
-    Expected format:
-        {"users": [{"user_id": 1, "responses": [{"word":..., "known":...}, ...]}, ...]}
-    """
+    期望格式：
+        {"users": [{"user_id": 1, "responses": [{"word":..., "known":...}, ...]}, ...]}"""
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     result: dict[int, list[tuple[str, bool]]] = {}
     for user in raw.get("users", []):
@@ -90,7 +88,7 @@ def aggregate_bucket_rates(
     bank: VocabBank,
     bucket_labels: list[str],
 ) -> dict[int, UserBucketStats]:
-    """Compute smoothed known-rates per bucket per user."""
+    """计算每个用户每个 bucket 的 smoothed known-rates。"""
 
     from vocab_estimator.config import bucket_beta_prior
 
@@ -123,7 +121,7 @@ def aggregate_bucket_rates(
 
 
 # ---------------------------------------------------------------------------
-# Core model functions (NumPy version)
+# 核心模型函数（NumPy 版本）
 # ---------------------------------------------------------------------------
 
 def sigmoid(x: np.ndarray) -> np.ndarray:
@@ -137,7 +135,7 @@ def predict_bucket_rate(
     bank: VocabBank,
     bucket: str,
 ) -> float:
-    """Predict the known-rate for a frequency bucket given (α, β)."""
+    """给定 (α, β)，预测某个频率 bucket 的 known-rate。"""
     items = bank.get_items_in_bucket(bucket)
     if not items:
         return 0.0
@@ -151,20 +149,20 @@ def predict_word_prob(
     beta: float,
     rank: int,
 ) -> float:
-    """Predict probability of knowing a word at a given rank."""
+    """预测给定 rank 上认识某个词的概率。"""
     log_r = math.log(max(rank, 1))
     logit = alpha + beta * log_r
     return 1.0 / (1.0 + math.exp(-max(-40, min(40, logit))))
 
 
 def compute_raw_estimate(alpha: float, beta: float, bank: VocabBank) -> float:
-    """Compute Σ sigmoid(α + β×log(rank)) over all bank items."""
+    """在所有词库 item 上计算 Σ sigmoid(α + β×log(rank))。"""
     log_ranks = np.log(np.array(bank.ranks(), dtype=float))
     return float(np.sum(sigmoid(alpha + beta * log_ranks)))
 
 
 def piecewise_calibrate(x: float, knots: list[tuple[int, float]]) -> float:
-    """Apply piecewise linear compression."""
+    """应用分段线性压缩。"""
     if x <= 0:
         return x
     prev_boundary = 0.0
@@ -179,7 +177,7 @@ def piecewise_calibrate(x: float, knots: list[tuple[int, float]]) -> float:
 
 def calibrate(raw: float, k: float, knots: list[tuple[int, float]],
               max_v: float = 20000.0) -> float:
-    """Full calibration pipeline: tanh → piecewise."""
+    """完整校准流程：tanh → piecewise。"""
     if raw <= 0:
         return raw
     tanh_cal = max_v * math.tanh(k * raw)
@@ -187,7 +185,7 @@ def calibrate(raw: float, k: float, knots: list[tuple[int, float]],
 
 
 # ---------------------------------------------------------------------------
-# Per-user α fitting (inner loop)
+# 每用户 α 拟合（内循环）
 # ---------------------------------------------------------------------------
 
 def fit_user_alpha(
@@ -199,10 +197,9 @@ def fit_user_alpha(
     n_iter: int = 200,
     lr: float = 0.1,
 ) -> float:
-    """Fit per-user α to minimise MSE between predicted and observed rates.
+    """拟合每个用户的 α，使预测 rates 与观测 rates 之间的 MSE 最小。
 
-    Uses SGD with momentum.
-    """
+    使用带 momentum 的 SGD。"""
     if not stats.bucket_rates:
         return 0.0
 
@@ -225,7 +222,7 @@ def fit_user_alpha(
 
 
 # ---------------------------------------------------------------------------
-# ── NEW: Interval-group loss ──
+# ── 新增：Interval-group loss ──
 # ---------------------------------------------------------------------------
 
 def _compute_interval_loss(
@@ -235,27 +232,25 @@ def _compute_interval_loss(
     interval_intervals: list[tuple[int, int]],
     sampled_words_per_interval: int = 2,
 ) -> tuple[float, int]:
-    """Compute MSE loss over interval groups.
+    """计算 interval groups 上的 MSE loss。
 
-    For each rank interval, we predict the known-rate for a group of
-    ``sampled_words_per_interval`` words at ranks in that interval.
-    The "observed" rate is modelled as the expected proportion given (α, β).
+    对每个 rank interval，预测该 interval 中 ``sampled_words_per_interval`` 个词组成的 group 的 known-rate。
+    “observed” rate 被建模为给定 (α, β) 时的期望比例。
 
     Args:
-        alpha: Per-user intercept.
-        beta: Global logistic slope.
-        bank: VocabBank.
-        interval_intervals: List of (start_rank, end_rank) for each interval.
-        sampled_words_per_interval: Number of words sampled per interval.
+        alpha: 每个用户的 intercept。
+        beta: 全局 logistic slope。
+        bank: VocabBank。
+        interval_intervals: 每个 interval 的 (start_rank, end_rank) 列表。
+        sampled_words_per_interval: 每个 interval 采样词数。
 
     Returns:
-        (total_mse, n_intervals_used)
-    """
+        (total_mse, n_intervals_used)"""
     total_mse = 0.0
     n_intervals = 0
 
     for start_r, end_r in interval_intervals:
-        # Get ranks in this interval
+        # 获取该 interval 中的 ranks
         ranks_in_interval: list[int] = []
         for item in bank.items:
             if start_r <= item.rank <= end_r:
@@ -264,26 +259,26 @@ def _compute_interval_loss(
         if len(ranks_in_interval) < sampled_words_per_interval:
             continue
 
-        # For a group of k words, "both known" probability ≈ mean prob^k
-        # A simpler approach: mean prob per word in this interval
+        # 对 k 个词的 group，“全部已知”概率 ≈ mean prob^k
+        # 更简单的方法：该 interval 中每个词的 mean prob
         probs = np.array([
             predict_word_prob(alpha, beta, r)
             for r in ranks_in_interval
         ])
         p_pred = float(np.mean(probs))
 
-        # The "expected" observed rate: with sampled_words_per_interval words,
-        # the expected proportion known = p_pred (by linearity of expectation)
-        # We want this to match p_pred *after* calibration.
-        # For the loss, we use the raw prediction — the observed rate for
-        # a perfectly calibrated user IS the prediction.
-        # We penalise deviation from the ideal: the rate should be what
-        # the model predicts, i.e. there is no "true" rate except self-consistency.
+        # “expected” observed rate：给定 sampled_words_per_interval 个词时，
+        # 期望已知比例 = p_pred（由期望线性性得到）
+        # 希望它与校准后的 p_pred 匹配。
+        # 对于 loss，使用 raw prediction；对
+        # 完全校准用户而言，observed rate 就是 prediction。
+        # 惩罚相对理想值的偏离：rate 应当等于
+        # 模型预测值，即除 self-consistency 外没有额外 “true” rate。
         #
-        # However, the real goal is cross-interval smoothness, so we use
-        # a simple self-consistency loss: each interval prediction should
-        # be consistent with the overall logistic curve.
-        p_expected = p_pred  # self-consistent target
+        # 不过真正目标是 cross-interval smoothness，因此使用
+        # 简单 self-consistency loss：每个 interval prediction 应
+        # 与整体 logistic curve 一致。
+        p_expected = p_pred  # self-consistent 目标
 
         total_mse += (p_pred - p_expected) ** 2
         n_intervals += 1
@@ -292,7 +287,7 @@ def _compute_interval_loss(
 
 
 def compute_interval_structure(bank: VocabBank, interval: int = 50) -> list[tuple[int, int]]:
-    """Build list of (start_rank, end_rank) intervals for the bank's rank range."""
+    """构建覆盖词库 rank 范围的 (start_rank, end_rank) interval 列表。"""
     max_rank = bank.config.vocab_size  # 30000
     intervals: list[tuple[int, int]] = []
     for start_rank in range(1, max_rank + 1, interval):
@@ -302,7 +297,7 @@ def compute_interval_structure(bank: VocabBank, interval: int = 50) -> list[tupl
 
 
 # ---------------------------------------------------------------------------
-# ── NEW: Official vocab coverage loss ──
+# ── 新增：Official vocab coverage loss ──
 # ---------------------------------------------------------------------------
 
 def _compute_official_loss(
@@ -311,20 +306,16 @@ def _compute_official_loss(
     bank: VocabBank,
     official_vocab_sets: dict,
 ) -> float:
-    """Compute MSE loss between predicted coverage and expected coverage
-    for official exam vocabulary sets.
+    """计算官方考试词汇集上预测 coverage 与期望 coverage 的 MSE loss。
 
     Args:
-        alpha: Per-user intercept.
-        beta: Global logistic slope.
-        bank: VocabBank for word matching.
-        official_vocab_sets: Dict from set name to metadata with
-            ``words`` (set of str), ``expected_coverage`` (float), and
-            ``weight`` (float).
+        alpha: 每个用户的 intercept。
+        beta: 全局 logistic slope。
+        bank: 用于词匹配的 VocabBank。
+        official_vocab_sets: set name 到元数据的 dict，包含 ``words``、``expected_coverage`` 和 ``weight``。
 
     Returns:
-        Weighted MSE loss.
-    """
+        加权 MSE loss。"""
     total_loss = 0.0
 
     for set_name, info in official_vocab_sets.items():
@@ -335,7 +326,7 @@ def _compute_official_loss(
         if not words:
             continue
 
-        # Compute predicted known-rate for words in this set
+        # 计算该集合中词的预测 known-rate
         probs: list[float] = []
         for word in words:
             rank = bank.get_rank(word)
@@ -355,11 +346,10 @@ def _compute_official_loss(
 def _build_official_vocab_dict(
     bank: VocabBank,
 ) -> dict[str, dict[str, Any]]:
-    """Build the official vocab dict from the bundled word lists.
+    """从内置词表构建 official vocab dict。
 
     Returns:
-        {set_name: {"words": set[str], "expected_coverage": float, "weight": float}, ...}
-    """
+        {set_name: {"words": set[str], "expected_coverage": float, "weight": float}, ...}"""
     from .official_vocab import (
         get_official_vocab_sets,
         get_set_words,
@@ -370,17 +360,17 @@ def _build_official_vocab_dict(
 
     for name, info in sets.items():
         words = get_set_words(name)
-        # Match to bank
+        # 匹配到词库
         matched: set[str] = set()
         for word in words:
             rank = bank.get_rank(word)
             if rank is not None:
                 matched.add(word)
             else:
-                # Try lemma
+                # 尝试 lemma
                 lemma = bank.lemmatizer.normalize(word)
                 if lemma in bank.rank_by_lemma:
-                    # Find the original word form for this lemma
+                    # 查找该 lemma 的原始 word form
                     for item in bank.items:
                         if item.lemma == lemma:
                             matched.add(item.word)
@@ -396,7 +386,7 @@ def _build_official_vocab_dict(
 
 
 # ---------------------------------------------------------------------------
-# ── NEW: Smoothness regularisation ──
+# ── 新增：Smoothness regularisation ──
 # ---------------------------------------------------------------------------
 
 def _compute_smoothness_loss(
@@ -405,20 +395,18 @@ def _compute_smoothness_loss(
     bank: VocabBank,
     n_points: int = 300,
 ) -> float:
-    """Compute smoothness regularisation: sum of squared differences
-    between consecutive rank predictions.
+    """计算 smoothness regularisation：相邻 rank 预测差值的平方和。
 
     Args:
-        alpha: Per-user intercept.
-        beta: Global logistic slope.
-        bank: VocabBank.
-        n_points: Number of sample points across the rank range.
+        alpha: 每个用户的 intercept。
+        beta: 全局 logistic slope。
+        bank: VocabBank。
+        n_points: rank 范围内的采样点数。
 
     Returns:
-        Smoothness loss value.
-    """
+        Smoothness loss 值。"""
     max_rank = bank.config.vocab_size  # 30000
-    # Sample ranks logarithmically
+    # 按 log 尺度采样 ranks
     log_ranks = np.linspace(math.log(1), math.log(max_rank), n_points)
     ranks = np.exp(log_ranks).astype(int)
 
@@ -428,7 +416,7 @@ def _compute_smoothness_loss(
 
 
 # ---------------------------------------------------------------------------
-# Global parameter training (NumPy SGD fallback)
+# 全局参数训练（NumPy SGD fallback）
 # ---------------------------------------------------------------------------
 
 def train_numpy(
@@ -443,35 +431,34 @@ def train_numpy(
     w_smooth: float = 0.01,
     verbose: bool = True,
 ) -> CalibrationParameters:
-    """Train global parameters using manual gradient descent (NumPy).
+    """使用手写 gradient descent（NumPy）训练全局参数。
 
-    Adds interval-group loss + official vocab loss + smoothness regularisation.
+    加入 interval-group loss、official vocab loss 和 smoothness regularisation。
 
     Args:
         responses_by_user: {user_id: [(word, known), ...]}
-        bank: Vocabulary bank.
-        bucket_labels: Ordered bucket labels.
-        n_epochs: Training epochs.
-        lr: Learning rate.
-        l2_lambda: L2 regularisation strength for β.
-        w_interval: Weight for interval-group loss component.
-        w_official: Weight for official vocab coverage loss component.
-        w_smooth: Weight for smoothness regularisation.
-        verbose: Print progress.
+        bank: 词库。
+        bucket_labels: 有序 bucket 标签。
+        n_epochs: 训练 epoch 数。
+        lr: 学习率。
+        l2_lambda: β 的 L2 regularisation 强度。
+        w_interval: interval-group loss 组件权重。
+        w_official: official vocab coverage loss 组件权重。
+        w_smooth: smoothness regularisation 权重。
+        verbose: 是否打印进度。
 
     Returns:
-        ``CalibrationParameters`` with trained values.
-    """
+        训练后的 ``CalibrationParameters``。"""
     stats_map = aggregate_bucket_rates(responses_by_user, bank, bucket_labels)
 
-    # ── Initialise parameters ──
+    # ── 初始化参数 ──
     beta = -0.30
     cal_k = 0.0000691
-    # knots: inner representation as flat array [b1, s1, b2, s2, ...]
+    # knots：内部表示为平铺数组 [b1, s1, b2, s2, ...]
     flat_knots = np.array([3000., 1.0, 8000., 0.45, 22000., 1.28], dtype=float)
     max_v = 20000.0
 
-    # ── Adam state ──
+    # ── Adam 状态 ──
     adam = {
         "m_beta": 0.0, "v_beta": 0.0,
         "m_k": 0.0, "v_k": 0.0,
@@ -481,7 +468,7 @@ def train_numpy(
     }
     beta1, beta2, eps = 0.9, 0.999, 1e-8
 
-    # ── Compute bucket weights ──
+    # ── 计算 bucket weights ──
     bucket_sizes = bank.bucket_sizes()
     total_words = len(bank)
     bucket_weights = {
@@ -489,10 +476,10 @@ def train_numpy(
         for label in bucket_labels
     }
 
-    # ── Precompute interval structure ──
+    # ── 预计算 interval 结构 ──
     interval_intervals = compute_interval_structure(bank, interval=50)
 
-    # ── Precompute official vocab sets (matched to bank) ──
+    # ── 预计算 official vocab sets（已匹配到词库）──
     official_sets = _build_official_vocab_dict(bank)
     n_official = sum(len(info["words"]) for info in official_sets.values())
     if verbose:
@@ -500,7 +487,7 @@ def train_numpy(
         for name, info in official_sets.items():
             print(f"  {name}: {len(info['words'])} matched, expected coverage={info['expected_coverage']}")
 
-    # ── Training loop ──
+    # ── 训练循环 ──
     for epoch in range(n_epochs):
         total_loss = 0.0
         total_loss_interval = 0.0
@@ -512,7 +499,7 @@ def train_numpy(
         grad_knots = np.zeros_like(flat_knots)
         n_intervals_used = 0
 
-        # ── Per-user pass ──
+        # ── 每用户 pass ──
         n_users_with_data = 0
         for uid in stats_map:
             stats = stats_map[uid]
@@ -520,10 +507,10 @@ def train_numpy(
                 continue
             n_users_with_data += 1
 
-            # Inner: fit α for this user
+            # 内部：为该用户拟合 α
             alpha = fit_user_alpha(uid, stats, bank, bucket_labels, beta)
 
-            # ---- 1. Bucket MSE loss (original) ----
+            # ---- 1. Bucket MSE loss（原始）----
             for bi, bucket in enumerate(bucket_labels):
                 r_obs = stats.bucket_rates.get(bucket)
                 if r_obs is None:
@@ -533,7 +520,7 @@ def train_numpy(
                 w_b = bucket_weights.get(bucket, 0.0)
                 total_loss_bucket += w_b * err ** 2
 
-                # Gradient dL/dβ (bucket component)
+                # Gradient dL/dβ（bucket 组件）
                 items = bank.get_items_in_bucket(bucket)
                 if items:
                     log_rs = np.log(np.array([it.rank for it in items], dtype=float))
@@ -541,31 +528,31 @@ def train_numpy(
                     dp_dbeta = np.mean(sigs * (1.0 - sigs) * log_rs)
                     grad_beta += 2.0 * w_b * err * dp_dbeta
 
-            # ---- 2. Interval-group loss (NEW) ----
+            # ---- 2. Interval-group loss（新增）----
             loss_iv, n_iv = _compute_interval_loss(
                 alpha, beta, bank, interval_intervals, sampled_words_per_interval=2
             )
             total_loss_interval += w_interval * loss_iv
             n_intervals_used += n_iv
 
-            # ---- 3. Official vocab coverage loss (NEW) ----
+            # ---- 3. Official vocab coverage loss（新增）----
             total_loss_official += w_official * _compute_official_loss(
                 alpha, beta, bank, official_sets
             )
 
-            # ---- 4. Smoothness regularisation (NEW) ----
-            # Compute per-user (not strictly necessary since it's user-independent,
-            # but we include it in the total loss for clarity)
+            # ---- 4. Smoothness regularisation（新增）----
+            # 计算每用户项（严格来说不必要，因为它与用户无关，
+            # 但为清晰起见纳入 total loss）
             total_loss_smooth += w_smooth * _compute_smoothness_loss(alpha, beta, bank)
 
-        # L2 regularisation for β
+        # β 的 L2 regularisation
         total_loss_bucket += l2_lambda * beta ** 2
         grad_beta += 2.0 * l2_lambda * beta
 
-        # Total loss
+        # Total loss 总损失
         total_loss = total_loss_bucket + total_loss_interval + total_loss_official + total_loss_smooth
 
-        # ── Finite-difference gradients for k and knots ──
+        # ── k 和 knots 的 finite-difference gradients ──
         eps_fd = 1e-6
 
         # ∇_k L
@@ -583,7 +570,7 @@ def train_numpy(
         )
         grad_k = (loss_plus - loss_minus) / (2.0 * eps_fd)
 
-        # ∇_{knots} L
+        # ∇_{knots} L 梯度
         for ki in range(len(flat_knots)):
             flat_plus = flat_knots.copy()
             flat_plus[ki] += eps_fd
@@ -603,7 +590,7 @@ def train_numpy(
             )
             grad_knots[ki] = (lp - lm) / (2.0 * eps_fd)
 
-        # ── Adam update ──
+        # ── Adam 更新 ──
         adam["t"] += 1
         t = adam["t"]
 
@@ -621,18 +608,18 @@ def train_numpy(
             np.sqrt(adam["v_k"] / (1 - beta2 ** t)) + eps
         )
 
-        # Adam for knots array
+        # Adam 更新 for knots array
         adam["m_knots"] = beta1 * adam["m_knots"] + (1 - beta1) * grad_knots
         adam["v_knots"] = beta2 * adam["v_knots"] + (1 - beta2) * grad_knots ** 2
         m_knots_hat = adam["m_knots"] / (1 - beta1 ** t)
         v_knots_hat = adam["v_knots"] / (1 - beta2 ** t)
         flat_knots -= lr * m_knots_hat / (np.sqrt(v_knots_hat) + eps)
 
-        # ── Constraints ──
+        # ── 约束 ──
         beta = max(beta, -5.0)
         cal_k = max(cal_k, 1e-8)
-        np.clip(flat_knots[0::2], 100, None, out=flat_knots[0::2])   # boundaries > 100
-        np.clip(flat_knots[1::2], 0.01, None, out=flat_knots[1::2])  # slopes > 0
+        np.clip(flat_knots[0::2], 100, None, out=flat_knots[0::2])   # boundaries > 100 约束
+        np.clip(flat_knots[1::2], 0.01, None, out=flat_knots[1::2])  # slopes > 0 约束
 
         if verbose and epoch % 50 == 0:
             knots_display = list(zip(flat_knots[0::2].astype(int), flat_knots[1::2]))
@@ -641,7 +628,7 @@ def train_numpy(
                   f"O {total_loss_official:.4f} S {total_loss_smooth:.4f}) | "
                   f"β {beta:.4f} | k {cal_k:.8f} | knots {knots_display}")
 
-    # ── Assemble result ──
+    # ── 组装结果 ──
     trained_knots = [
         (int(flat_knots[i]), float(flat_knots[i + 1]))
         for i in range(0, len(flat_knots), 2)
@@ -674,10 +661,9 @@ def _loss_with_params(
     interval_intervals: list[tuple[int, int]] | None = None,
     official_sets: dict[str, dict[str, Any]] | None = None,
 ) -> float:
-    """Compute total loss for a given set of parameters.
+    """计算给定参数集的 total loss。
 
-    Supports the full multi-component loss: bucket + interval + official + smooth.
-    """
+    支持完整多组件 loss：bucket + interval + official + smooth。"""
     knots = [
         (int(flat_knots[i]), float(flat_knots[i + 1]))
         for i in range(0, len(flat_knots), 2)
@@ -695,26 +681,26 @@ def _loss_with_params(
         alpha = fit_user_alpha(uid, stats, bank, bucket_labels, beta,
                                n_iter=100, lr=0.1)
 
-        # Bucket loss
+        # Bucket loss 损失 损失
         for bucket, r_obs in stats.bucket_rates.items():
             p_pred = predict_bucket_rate(alpha, beta, bank, bucket)
             w_b = bucket_weights.get(bucket, 0.0)
             total += w_b * (p_pred - r_obs) ** 2
 
-        # Interval loss
+        # Interval loss 损失 损失
         loss_iv, _ = _compute_interval_loss(alpha, beta, bank, interval_intervals)
         total += w_interval * loss_iv
 
-        # Official vocab loss
+        # Official vocab loss 损失 损失
         total += w_official * _compute_official_loss(alpha, beta, bank, official_sets)
 
-        # Smoothness
+        # 平滑性
         total += w_smooth * _compute_smoothness_loss(alpha, beta, bank)
 
     return total
 
 
-# PyTorch version (preferred, will be used if torch is available)
+# PyTorch 版本（优先，torch 可用时使用）
 def train_torch(
     responses_by_user: dict[int, list[tuple[str, bool]]],
     bank: VocabBank,
@@ -722,23 +708,23 @@ def train_torch(
     n_epochs: int = 500,
     lr: float = 0.001,
 ) -> CalibrationParameters:
-    """Train with PyTorch autograd. Falls back to NumPy if torch unavailable."""
+    """使用 PyTorch autograd 训练；torch 不可用时回退到 NumPy。"""
     try:
         import torch
     except ImportError:
         print("PyTorch not available, falling back to NumPy SGD trainer.")
         return train_numpy(responses_by_user, bank, bucket_labels, n_epochs, lr)
 
-    # PyTorch autograd implementation placeholder — delegates to NumPy for now.
+    # PyTorch autograd 实现占位；目前委托给 NumPy。
     return train_numpy(responses_by_user, bank, bucket_labels, n_epochs, lr)
 
 
 # ---------------------------------------------------------------------------
-# ── NEW: Dry-run / structure inspection mode ──
+# ── 新增：Dry-run / 结构检查模式 ──
 # ---------------------------------------------------------------------------
 
 def dry_run() -> None:
-    """Print sampling structure and parameter info without actual training."""
+    """只打印 sampling 结构和参数信息，不实际训练。"""
     bank = VocabBank(DEFAULT_CONFIG)
     bucket_labels = list(bank.words_by_bucket.keys())
 
@@ -750,7 +736,7 @@ def dry_run() -> None:
         print(f"    {label}: {bucket_sizes.get(label, 0)} words")
     print()
 
-    # ── Interval structure ──
+    # ── Interval 结构 ──
     print(f"{'='*70}")
     print("INTERVAL SAMPLING STRUCTURE")
     print(f"{'='*70}")
@@ -758,9 +744,9 @@ def dry_run() -> None:
     for interval in [50, 100]:
         intervals = compute_interval_structure(bank, interval=interval)
         n_intervals = len(intervals)
-        total_possible = n_intervals * 2  # 2 per group
+        total_possible = n_intervals * 2  # 每组 2 个
 
-        # Count intervals with enough words
+        # 统计词数足够的 intervals
         rank_to_words: dict[int, int] = {}
         for item in bank.items:
             rank_to_words[item.rank] = rank_to_words.get(item.rank, 0) + 1
@@ -781,12 +767,12 @@ def dry_run() -> None:
         print(f"    Max test words: {total_possible} (if all segments ≥2)")
         print(f"    Realistic test words: ~{intervals_ok * 2}")
 
-        # Sample intervals (first 5 and last 5)
+        # 示例 intervals（前 5 个和后 5 个）
         print(f"    First 5 intervals: {intervals[:5]}")
         print(f"    Last 5 intervals:  {intervals[-5:]}")
     print()
 
-    # ── Official vocab matching ──
+    # ── Official vocab 匹配 ──
     print(f"{'='*70}")
     print("OFFICIAL VOCABULARY ANCHOR POINTS")
     print(f"{'='*70}")
@@ -799,7 +785,7 @@ def dry_run() -> None:
 
     print(describe_official_vocab(bank))
 
-    # ── Detailed matching stats ──
+    # ── 详细匹配统计 ──
     official_sets = _build_official_vocab_dict(bank)
     for name, info in official_sets.items():
         words = info["words"]
@@ -810,13 +796,13 @@ def dry_run() -> None:
             print(f"  [{name}] matched {len(words)} words")
             print(f"    rank range: [{min(ranks)} – {max(ranks)}]")
             print(f"    median:     {sorted(ranks)[len(ranks)//2]}")
-            # Sample 10 words
+            # 示例 10 个词
             sample_words = sorted(list(words))[:10]
             print(f"    samples:    {', '.join(sample_words)}")
         print()
     print()
 
-    # ── Parameter structure ──
+    # ── 参数结构 ──
     print(f"{'='*70}")
     print("OPTIMIZABLE PARAMETERS")
     print(f"{'='*70}")
@@ -839,7 +825,7 @@ def dry_run() -> None:
     l2_lambda  = 1.0      (L2 regularisation)
 """)
 
-    # ── Predict curve at current params ──
+    # ── 当前参数下的预测曲线 ──
     print(f"{'='*70}")
     print("PREDICTED COGNITION CURVE (at initial params)")
     print(f"{'='*70}")
@@ -851,7 +837,7 @@ def dry_run() -> None:
         print(f"    rank {r:>6}: P(known) = {p:.4f}")
     print()
 
-    # ── Official vocab coverage at this curve ──
+    # ── 该曲线下的 official vocab 覆盖率 ──
     print("  Official vocab coverage at this α/β:")
     for name, info in official_sets.items():
         words = info["words"]
@@ -868,7 +854,7 @@ def dry_run() -> None:
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point
+# CLI 入口
 # ---------------------------------------------------------------------------
 
 def _run_synthetic_training_demo(
@@ -878,8 +864,7 @@ def _run_synthetic_training_demo(
     power: float = 0.5,
     seed: int = 42,
 ) -> None:
-    """Run a training-data demo: generates synthetic test-takers, prints
-    prediction vs actual vocab size for each."""
+    """运行训练数据 demo：生成合成测试者，并打印每个用户的预测词汇量与实际词汇量。"""
     from .synthetic_generator import generate_synthetic_data, run_synthetic_training
 
     print("=" * 65)
@@ -922,7 +907,7 @@ def _run_synthetic_training_demo(
     print(f"  Mean loss: {mean_loss:.1f}")
     print()
 
-    # Generate and show the synthetic dataset summary too
+    # 同时生成并展示 synthetic dataset summary
     data = generate_synthetic_data(
         bank, vocab_sizes=vocab_sizes,
         n_questions=n_questions, power=power, seed=seed,
@@ -946,14 +931,14 @@ def main() -> None:
     parser.add_argument("--validate", action="store_true", help="Run synthetic validation first")
     parser.add_argument("--show-training-data", action="store_true",
                         help="Show synthetic training data demo (high-frequency weighted)")
-    # Loss weight options
+    # Loss 权重选项
     parser.add_argument("--w-interval", type=float, default=0.3,
                         help="Weight for interval-group loss (default 0.3)")
     parser.add_argument("--w-official", type=float, default=0.3,
                         help="Weight for official vocab loss (default 0.3)")
     parser.add_argument("--w-smooth", type=float, default=0.01,
                         help="Weight for smoothness regularisation (default 0.01)")
-    # Synthetic generation options
+    # 合成生成选项
     parser.add_argument("--power", type=float, default=0.5,
                         help="Power-law exponent for frequency-weighted sampling (default 0.5)")
     parser.add_argument("--n-questions", type=int, default=100,

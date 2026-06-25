@@ -589,7 +589,7 @@ progress {
   justify-content: center;
 }
 
-/* ── Navigation buttons ── */
+/* ── 导航按钮 ── */
 
 .quizNav {
   display: flex;
@@ -603,7 +603,7 @@ progress {
   min-width: 120px;
 }
 
-/* ── Summary page ── */
+/* ── 总结页 ── */
 
 .summaryContainer {
   width: min(560px, 100%);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fill pending translations in data/stage_vocab.json with checkpoint resume."""
+"""带 checkpoint resume 地补全 data/stage_vocab.json 中待翻译项。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ MAX_BATCHES_PER_RUN = int(os.environ.get("MAX_BATCHES_PER_RUN", "10"))
 
 
 class TranslationError(RuntimeError):
-    """Raised when the current run should stop and preserve the checkpoint."""
+    """当前运行应停止并保留 checkpoint 时抛出。"""
 
 
 def load_json(path: Path) -> dict[str, Any]:

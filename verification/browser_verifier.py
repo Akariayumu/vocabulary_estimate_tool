@@ -1,8 +1,7 @@
-"""Compare this estimator with a browser run on testyourvocab.com.
+"""将本估算器与 testyourvocab.com 的浏览器运行结果对比。
 
-The external website changes over time and may redirect to Preply. This module
-therefore treats browser automation as best-effort: it records the final URL,
-handles redirects, and still computes the local algorithm result for comparison.
+外部网站会随时间变化，也可能重定向到 Preply。因此本模块将浏览器自动化视为
+best-effort：记录最终 URL，处理重定向，并仍然计算本地算法结果用于对比。
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ DEFAULT_REPORT = PROJECT_ROOT / "reports" / "browser_verification_report.json"
 
 
 def load_known_words(value: str | None) -> set[str]:
-    """Load known words from a comma-separated string or a text file."""
+    """从逗号分隔字符串或文本文件加载已知词。"""
 
     if not value:
         return {
@@ -50,7 +49,7 @@ def load_known_words(value: str | None) -> set[str]:
 
 
 def local_estimate(known_words: set[str]) -> dict[str, Any]:
-    """Run this project's estimator over known words visible in the bank."""
+    """用词库中可见的已知词运行本项目估算器。"""
 
     bank = VocabBank(DEFAULT_CONFIG)
     responses = [(item.word, item.word.lower() in known_words) for item in bank.items[:160]]
@@ -63,7 +62,7 @@ def local_estimate(known_words: set[str]) -> dict[str, Any]:
 
 
 def api_estimate(api_url: str, known_words: set[str]) -> dict[str, Any] | None:
-    """Call a running local API when requested."""
+    """按需调用正在运行的本地 API。"""
 
     bank = VocabBank(DEFAULT_CONFIG)
     responses = [
@@ -84,12 +83,12 @@ def api_estimate(api_url: str, known_words: set[str]) -> dict[str, Any] | None:
 
 
 def run_browser(site_url: str, known_words: set[str], headless: bool = True) -> dict[str, Any]:
-    """Open the external site, tick known words where possible, and scrape a result."""
+    """打开外部网站，尽可能勾选已知词，并抓取结果。"""
 
     try:
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
         from playwright.sync_api import sync_playwright
-    except Exception as exc:  # pragma: no cover - dependency may not be installed.
+    except Exception as exc:  # pragma: no cover - 依赖可能未安装。
         return {
             "status": "playwright_unavailable",
             "error": str(exc),
@@ -138,7 +137,7 @@ def run_browser(site_url: str, known_words: set[str], headless: bool = True) -> 
 
 
 def check_known_words(page: Any, known_words: set[str]) -> list[str]:
-    """Tick visible checkboxes whose adjacent label matches a known word."""
+    """勾选相邻标签匹配已知词的可见复选框。"""
 
     script = """
     (knownWords) => {
@@ -179,7 +178,7 @@ def check_known_words(page: Any, known_words: set[str]) -> list[str]:
 
 
 def submit_visible_form(page: Any) -> None:
-    """Click the most likely submit/continue button."""
+    """点击最可能的提交/继续按钮。"""
 
     candidates = [
         "button[type=submit]",
@@ -201,7 +200,7 @@ def submit_visible_form(page: Any) -> None:
 
 
 def scrape_vocab_result(page: Any) -> int | None:
-    """Find a vocabulary-size number in page text."""
+    """在页面文本中查找词汇量数字。"""
 
     text = page.locator("body").inner_text(timeout=5000)
     patterns = [

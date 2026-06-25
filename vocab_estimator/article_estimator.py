@@ -1,4 +1,4 @@
-"""Article-based vocabulary-size estimation using ``stage_vocab.json`` only."""
+"""仅基于 ``stage_vocab.json`` 的文章词汇量估算。"""
 
 from __future__ import annotations
 
@@ -638,7 +638,7 @@ def tokenize_article(
     text: str,
     entries: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
-    """Extract lowercase content-word lemmas with a built-in stopword list."""
+    """使用内置停用词表提取小写内容词 lemmas。"""
 
     tokens: list[str] = []
     for word in WORD_RE.findall(text.lower()):
@@ -654,7 +654,7 @@ def lemmatize_word(
     word: str,
     entries: dict[str, dict[str, Any]] | None = None,
 ) -> str:
-    """Return a lightweight rule-based lemma, preferring stage-vocab hits."""
+    """返回轻量规则型 lemma，并优先匹配 stage-vocab 中的词。"""
 
     candidates = _lemma_candidates(word)
     if entries is not None:
@@ -750,7 +750,7 @@ def _undouble_final_consonant(stem: str) -> str:
 
 @lru_cache(maxsize=4)
 def load_stage_vocab(stage_vocab_path: str | Path = DEFAULT_STAGE_VOCAB_PATH) -> dict[str, Any]:
-    """Load and normalize article-estimation data from ``stage_vocab.json``."""
+    """从 ``stage_vocab.json`` 加载并归一化文章估算数据。"""
 
     path = Path(stage_vocab_path)
     with path.open(encoding="utf-8") as f:
@@ -833,10 +833,10 @@ def estimate_article(
     article: str,
     stage_vocab_path: str | Path = DEFAULT_STAGE_VOCAB_PATH,
 ) -> dict[str, Any]:
-    """Estimate the vocabulary needed to read an article.
+    """估算阅读一篇文章所需的词汇量。
 
-    The estimate is the cumulative position of the article's median difficulty
-    in the stage vocabulary: ``P(vocab_difficulty <= article_median) * N``.
+    估算值为文章 difficulty 中位数在阶段词库中的累计位置：
+    ``P(vocab_difficulty <= article_median) * N``。
     """
 
     if not isinstance(article, str) or not article.strip():

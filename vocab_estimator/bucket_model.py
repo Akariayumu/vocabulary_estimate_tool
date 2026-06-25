@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Bucket matrix vocabulary estimator.
+"""Bucket matrix 词汇量估算器。
 
-Trained on V100 (192.168.100.104) with self-consistent synthetic data.
-Each bucket gets its own θ parameter, combined with a per-user γ offset.
+在 V100（192.168.100.104）上使用自洽合成数据训练。
+每个 bucket 拥有自己的 θ 参数，并与每个用户的 γ offset 组合。
 
 Model:
   P(known|bucket_b) = sigmoid(θ_b + γ_u)
   Vocab = Σ_bucket [ bucket_size_b × sigmoid(θ_b + γ_u) ]
 
-Params from trained_params_bucket.json.
+参数来自 trained_params_bucket.json。
 """
 import json, math
 from pathlib import Path
@@ -41,20 +41,20 @@ def is_available() -> bool:
 
 
 def estimate(responses: list[tuple[str, bool]], bucket_fn) -> dict:
-    """Estimate vocabulary using bucket matrix model.
+    """使用 bucket matrix model 估算词汇量。
 
     Args:
         responses: [(word, known), ...]
         bucket_fn: callable(word) -> bucket_name (e.g. '1k', '5k', None)
 
     Returns:
-        dict with point_estimate, level, etc. matching estimate_single format.
+        与 estimate_single 格式匹配的 dict，包含 point_estimate、level 等。
     """
     params = _load_params()
     theta = params["theta"]
     bucket_sizes = params["bucket_sizes"]
 
-    # Aggregate responses by bucket
+    # 按 bucket 聚合 responses
     bucket_counts: dict[str, list[bool]] = {}
     for word, known in responses:
         b = bucket_fn(word)
@@ -73,27 +73,27 @@ def estimate(responses: list[tuple[str, bool]], bucket_fn) -> dict:
             "ignored_responses": len(responses),
         }
 
-    # Bayesian gamma fitting using cross-entropy with Beta(1,1) uniform prior
-    # Posterior mean for bucket b: (known + 1) / (n + 2) — Laplace smoothing
-    # Cross-entropy loss avoids sigmoid saturation at extreme theta values
-    # and naturally pulls estimates toward 0.5 when sample is small
+    # 使用 cross-entropy 与 Beta(1,1) uniform prior 拟合 Bayesian gamma
+    # bucket b 的 posterior mean：(known + 1) / (n + 2) — Laplace smoothing
+    # Cross-entropy loss 可避免极端 theta 下 sigmoid 饱和，
+    # 并在样本较少时自然把估计拉向 0.5
 
     def _compute_loss(g):
-        """Cross-entropy loss for a given gamma."""
+        """给定 gamma 时的 cross-entropy loss。"""
         loss = 0.0
         for b, vals in bucket_counts.items():
             n_total = len(vals)
             n_known = sum(vals)
-            # Target rate = posterior mean with Beta(1,1) uniform prior
+            # 目标率 = 使用 Beta(1,1) uniform prior 的 posterior mean
             target = (n_known + 1.0) / (n_total + 2.0)
             target = max(min(target, 1.0 - 1e-15), 1e-15)
             p_model = 1.0 / (1.0 + math.exp(-(theta[b] + g)))
             p_model = max(min(p_model, 1.0 - 1e-15), 1e-15)
-            # Cross-entropy: -target*log(p) - (1-target)*log(1-p)
+            # Cross-entropy 公式：-target*log(p) - (1-target)*log(1-p)
             loss -= target * math.log(p_model) + (1.0 - target) * math.log(1.0 - p_model)
         return loss
 
-    # Grid search γ in [-15, 15], step 0.1
+    # 在 [-15, 15] 上网格搜索 γ，步长 0.1
     best_gamma = 0.0
     best_loss = float("inf")
 
@@ -104,7 +104,7 @@ def estimate(responses: list[tuple[str, bool]], bucket_fn) -> dict:
             best_loss = loss
             best_gamma = g
 
-    # Refine with finer grid around best
+    # 在最优点附近用更细网格细化
     for g_int in range(int(best_gamma * 10) - 3, int(best_gamma * 10) + 4):
         g = g_int / 10.0
         loss = _compute_loss(g)
@@ -114,18 +114,18 @@ def estimate(responses: list[tuple[str, bool]], bucket_fn) -> dict:
 
     gamma = best_gamma
 
-    # Compute raw vocabulary estimate
+    # 计算 raw 词汇量估算
     raw_est = 0.0
     for b in _BUCKET_ORDER:
         sz = bucket_sizes[b]
         p_know = 1.0 / (1.0 + math.exp(-(theta[b] + gamma)))
         raw_est += sz * p_know
 
-    # Calibration is essentially identity (k≈0, knots≈1), but apply for compatibility
+    # 校准基本等同恒等变换（k≈0，knots≈1），但为兼容性仍然应用
     cal = _calibrate_bucket(raw_est, params)
 
-    # Level mapping (use existing vocab_model logic by importing)
-    # Simplified level mapping
+    # 等级映射（通过导入复用现有 vocab_model 逻辑）
+    # 简化版等级映射
     levels = [
         (1500, "初中"),
         (2500, "高中"),
@@ -156,19 +156,19 @@ def estimate(responses: list[tuple[str, bool]], bucket_fn) -> dict:
 
 
 def _calibrate_bucket(estimate: float, params: dict) -> float:
-    """Calibration from bucket model params. Near identity."""
+    """根据 bucket model 参数做校准，结果接近恒等变换。"""
     k = params.get("calibration_k", 0.0)
     if k < -1e-8:
-        k = 0.0  # clamp negative k (means tanh is unused)
+        k = 0.0  # clamp 负 k（表示不使用 tanh）
     knots = params.get("piecewise_knots", [])
 
-    # Tanh stage (k near 0, so effectively identity)
+    # Tanh 阶段（k 接近 0，因此实际近似恒等）
     if k > 1e-10:
         cal = 20000.0 * math.tanh(k * estimate)
     else:
         cal = estimate
 
-    # Piecewise stage (knots near 1.0, so effectively identity)
+    # Piecewise 阶段（knots 接近 1.0，因此实际近似恒等）
     if knots:
         b = [3000, 8000, 22000]
         ks = [knots[0][1], knots[1][1] if len(knots) > 1 else 1.0,
@@ -183,4 +183,4 @@ def _calibrate_bucket(estimate: float, params: dict) -> float:
         else:
             cal = pv + (cal - pb) * ks[-1]
 
-    return min(cal, 21000.0)  # ceiling
+    return min(cal, 21000.0)  # 上限

@@ -1,6 +1,6 @@
-"""Command-line entry point for the vocabulary estimator.
+"""词汇量估算器的命令行入口。
 
-Input JSON example:
+输入 JSON 示例：
 
 {
   "responses": {
@@ -32,7 +32,7 @@ from vocab_estimator.vocab_model import VocabEstimator
 
 
 def normalize_responses(raw: Any) -> dict[str, list[tuple[str, bool]]]:
-    """Validate and normalize response JSON into ``(word, known)`` pairs."""
+    """校验并归一化 response JSON 为 ``(word, known)`` 对。"""
 
     if not isinstance(raw, dict):
         raise ValueError("responses must be a dict: {class: [[word, known_bool], ...]}")
@@ -54,7 +54,7 @@ def normalize_responses(raw: Any) -> dict[str, list[tuple[str, bool]]]:
 
 
 def normalize_documents(raw: Any) -> dict[str, list[str]]:
-    """Normalize document path JSON into ``{class: [paths...]}``."""
+    """将文档路径 JSON 归一化为 ``{class: [paths...]}``。"""
 
     if raw is None:
         return {}
@@ -73,7 +73,7 @@ def normalize_documents(raw: Any) -> dict[str, list[str]]:
 
 
 def run_estimation(payload: dict[str, Any]) -> dict:
-    """Run the full hybrid model for all learner classes."""
+    """为所有学习者类别运行完整 hybrid model。"""
 
     responses = normalize_responses(payload.get("responses", payload))
     documents = normalize_documents(payload.get("documents"))
@@ -107,7 +107,7 @@ def run_estimation(payload: dict[str, Any]) -> dict:
 
 
 def load_payload(path: str | Path) -> dict[str, Any]:
-    """Read an input JSON file."""
+    """读取输入 JSON 文件。"""
 
     return json.loads(Path(path).read_text(encoding="utf-8"))
 

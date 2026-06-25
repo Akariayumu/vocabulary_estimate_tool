@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Batch-generate Chinese translations for untranslated words (rank 5001-15000)
-using the free Google Translate API.
+"""使用免费 Google Translate API 批量生成未翻译词（rank 5001-15000）的中文翻译。
 
-Usage: python3 scripts/generate_translations.py
+用法：python3 scripts/generate_translations.py
 """
 
 import os, sys, re, time, json
@@ -18,7 +17,7 @@ from server.translations import TRANSLATIONS
 bank = VocabBank(DEFAULT_CONFIG)
 existing = {k.lower(): v for k, v in TRANSLATIONS.items()}
 
-# Find all missing translations in rank 5001-15000
+# 查找 rank 5001-15000 中所有缺失翻译
 missing_words = []
 for item in bank.items:
     if not (5001 <= item.rank <= 15000):
@@ -33,16 +32,16 @@ for item in bank.items:
         continue
     missing_words.append((item.rank, w))
 
-# Limit to ~4500 words
+# 限制为约 4500 个词
 MAX_WORDS = 4500
 missing_words = missing_words[:MAX_WORDS]
 print(f"Missing translations in rank 5001-15000: {len(missing_words)}")
 
-BATCH_SIZE = 150  # words per API call
+BATCH_SIZE = 150  # 每次 API 调用的词数
 TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
 
 def translate_batch(words):
-    """Translate a list of words using Google Translate API."""
+    """使用 Google Translate API 翻译词列表。"""
     text = "\n".join(words)
     params = {
         "client": "gtx",
@@ -55,7 +54,7 @@ def translate_batch(words):
         r = requests.get(TRANSLATE_URL, params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
-        # Parse: data[0] is list of [translation, original, ...]
+        # 解析：data[0] 是 [translation, original, ...] 列表
         results = {}
         for entry in data[0]:
             if isinstance(entry, list) and len(entry) >= 2:
@@ -68,7 +67,7 @@ def translate_batch(words):
         print(f"  API error: {e}")
         return {}
 
-# Process in batches
+# 分批处理
 all_translations = {}
 for start in range(0, len(missing_words), BATCH_SIZE):
     batch = missing_words[start:start + BATCH_SIZE]
@@ -82,12 +81,12 @@ for start in range(0, len(missing_words), BATCH_SIZE):
     all_translations.update(results)
     print(f"got {len(results)} translations")
     
-    # Rate limit: 1 second between batches
+    # 速率限制：批次间隔 1 秒
     time.sleep(1.0)
 
 print(f"\nTotal translations generated: {len(all_translations)}")
 
-# Write to translations.py
+# 写入 translations.py
 if all_translations:
     path = os.path.join(PROJECT_ROOT, "server", "translations.py")
     with open(path, "r") as f:

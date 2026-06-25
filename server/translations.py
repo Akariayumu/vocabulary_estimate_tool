@@ -1,6 +1,6 @@
-"""Chinese glosses for vocabulary quiz multiple-choice questions.
+"""词汇测验选择题使用的中文释义。
 
-Loaded from ``data/translations.json`` at import time.
+导入时从 ``data/translations.json`` 加载。
 """
 
 from __future__ import annotations

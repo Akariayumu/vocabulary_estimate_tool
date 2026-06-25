@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate synthetic test samples for calibration training."""
+"""为校准训练生成合成测试样本。"""
 import sys, json, random, math
 from pathlib import Path
 
@@ -15,11 +15,11 @@ N_USERS = 1000
 TEST_QS = 100
 POWER = 0.5
 
-# Vocabulary levels to simulate (evenly spaced from 500 to 20000)
-vocab_levels = [int(x) for x in range(200, 20001, 20)]  # ~1000 levels
+# 要模拟的词汇量等级（从 500 到 20000 均匀分布）
+vocab_levels = [int(x) for x in range(200, 20001, 20)]  # 约 1000 个等级
 
 def build_known_set(vocab_size):
-    """Build a known vocabulary set by filling from highest-frequency buckets."""
+    """从最高频 buckets 开始填充，构建已知词集合。"""
     known = set()
     remaining = vocab_size
     for bucket_name in ['1k','2k','3k','5k','8k','10k','15k','20k','30k']:
@@ -32,16 +32,16 @@ def build_known_set(vocab_size):
     return known
 
 def sample_test_questions(n=100, power=0.5):
-    """Sample test questions with high-frequency bias (like real exams)."""
+    """带高频偏置地抽样测试题（类似真实考试）。"""
     all_items = list(bank.items)
-    # Weight proportional to 1/rank^power
+    # 权重与 1/rank^power 成正比
     weights = [1.0 / (max(item.rank, 1) ** power) for item in all_items]
     total = sum(weights)
     probs = [w / total for w in weights]
     chosen = rng.choices(all_items, weights=probs, k=n)
     return [c.word for c in chosen]
 
-# Generate data
+# 生成数据
 dataset = {}
 for vid, target_size in enumerate(vocab_levels):
     known_set = build_known_set(target_size)
@@ -57,7 +57,7 @@ for vid, target_size in enumerate(vocab_levels):
         "n_known": sum(1 for r in responses if r["known"]),
     }
 
-# Statistics
+# 统计
 print(f"Generated {len(dataset)} synthetic users")
 print(f"Vocabulary levels: {vocab_levels[0]} - {vocab_levels[-1]}")
 print(f"Test questions per user: {TEST_QS}")
@@ -73,7 +73,7 @@ for vid in sorted(dataset.keys(), key=lambda k: dataset[k]['vocab_size']):
     if int(vid) % 10 == 0 or int(vid) == len(dataset)-1:
         print(f"{d['vocab_size']:>8} {kr:>7.1f}% {d['n_known']:>3}/{TEST_QS}")
 
-# Save
+# 保存
 output = Path("test_samples.json")
 with open(output, 'w') as f:
     json.dump({"dataset": dataset, "meta": {

@@ -1,10 +1,8 @@
-"""Synthetic test-response generator for calibration pipeline validation.
+"""用于校准流程验证的合成测试 response 生成器。
 
-Generates a population of synthetic test-takers with known (α, β) parameters,
-then renders binary responses on a stratified word list.  The resulting dataset
-can be fed to ``calibration_trainer`` to verify that the original global
-parameters (β, k, piecewise_knots) can be recovered from the data.
-"""
+生成一组合成测试者，其 (α, β) 参数已知，然后在分层词表上渲染二元 responses。
+生成的数据可输入 ``calibration_trainer``，用于验证能否从数据中恢复原始全局参数
+（β、k、piecewise_knots）。"""
 
 from __future__ import annotations
 
@@ -25,7 +23,7 @@ from vocab_estimator.vocab_model import VocabEstimator
 
 
 # ---------------------------------------------------------------------------
-# Known "ground truth" parameters
+# 已知的 “ground truth” 参数
 # ---------------------------------------------------------------------------
 
 TRUE_BETA = -0.285
@@ -53,13 +51,13 @@ def piecewise_calibrate(x: float, knots: list[tuple[int, float]]) -> float:
 
 
 def calibrate_vocab(raw: float) -> float:
-    """Apply TRUE calibration parameters."""
+    """应用 TRUE 校准参数。"""
     cal = TRUE_MAX_V * math.tanh(TRUE_K * raw)
     return piecewise_calibrate(cal, TRUE_KNOTS)
 
 
 # ---------------------------------------------------------------------------
-# Synthetic user generation
+# 合成用户生成
 # ---------------------------------------------------------------------------
 
 def generate_user(
@@ -71,30 +69,29 @@ def generate_user(
     noise: float = 0.02,
     rng: random.Random | None = None,
 ) -> list[tuple[str, bool]]:
-    """Generate a synthetic user's responses.
+    """生成一个合成用户的 responses。
 
     Args:
-        alpha: Per-user intercept (ability parameter).
-        bank: Vocabulary bank.
-        sampler: For stratified word selection.
-        questions_per_user: Number of test questions for this user.
-        noise: Label-flip probability (simulates careless mistakes).
-        rng: Random state for reproducibility.
+        alpha: 每个用户的 intercept（能力参数）。
+        bank: 词库。
+        sampler: 用于分层选词。
+        questions_per_user: 该用户的测试题数。
+        noise: 标签翻转概率（模拟粗心错误）。
+        rng: 用于复现的随机状态。
 
     Returns:
-        [(word, known), ...]
-    """
+        [(word, known), ...]"""
     if rng is None:
         rng = random.Random(42 + user_id)
 
-    # Sample a stratified word list for this user
+    # 为该用户采样分层词表
     items = sampler.balanced_sample(per_bucket=4)
-    # Get more words if needed
+    # 需要时获取更多词
     while len(items) < questions_per_user:
         extra = sampler.balanced_sample(per_bucket=2)
         items.extend(extra)
 
-    # Shuffle and trim
+    # shuffle 并裁剪
     rng.shuffle(items)
     items = items[:questions_per_user]
 
@@ -103,7 +100,7 @@ def generate_user(
         log_rank = math.log(max(rank, 1))
         logit = alpha + TRUE_BETA * log_rank
         prob = 1.0 / (1.0 + math.exp(-logit))
-        # Apply noise
+        # 应用 noise
         prob = (1.0 - noise) * prob + noise * 0.5
         known = rng.random() < prob
         responses.append((word, known))
@@ -117,24 +114,22 @@ def generate_population(
     questions_per_user: int = 80,
     seed: int = 42,
 ) -> dict[int, list[tuple[str, bool]]]:
-    """Generate a population of synthetic test-takers.
+    """生成一组合成测试者。
 
-    α values are evenly spaced from -5 (low ability, ~1500 vocab)
-    to +3 (high ability, ~15000 vocab).  With TRUE_BETA = -0.285,
-    this translates to raw estimates from ~2500 to ~21000.
+    α 值从 -5（低能力，约 1500 词）到 +3（高能力，约 15000 词）均匀分布。
+    在 TRUE_BETA = -0.285 时，这对应约 2500 到 21000 的 raw estimates。
 
-    Distribution:
-        20% low ability    (α ∈ [-5.0, -3.0])
-        40% medium ability (α ∈ [-3.0,  0.0])
-        30% high ability   (α ∈ [ 0.0,  2.0])
-        10% very high      (α ∈ [ 2.0,  3.5])
-    """
+    分布：
+        20% 低能力    (α ∈ [-5.0, -3.0])
+        40% 中能力    (α ∈ [-3.0,  0.0])
+        30% 高能力    (α ∈ [ 0.0,  2.0])
+        10% 很高能力  (α ∈ [ 2.0,  3.5])"""
     rng = random.Random(seed)
     sampler = VocabularySampler(bank, DEFAULT_CONFIG, seed=seed)
 
     population: dict[int, list[tuple[str, bool]]] = {}
 
-    # Stratified α generation
+    # 分层 α 生成
     alpha_ranges = [
         (-5.0, -3.0, int(n_users * 0.20)),
         (-3.0, 0.0, int(n_users * 0.40)),
@@ -161,7 +156,7 @@ def generate_population(
 
 
 # ---------------------------------------------------------------------------
-# Validation runner
+# 验证运行器
 # ---------------------------------------------------------------------------
 
 def synthetic_validation(
@@ -169,16 +164,15 @@ def synthetic_validation(
     bucket_labels: list[str],
     n_users: int = 50,
 ) -> dict[str, Any]:
-    """Run synthetic validation: generate, train, check recovery accuracy.
+    """运行合成验证：生成数据、训练模型并检查参数恢复精度。
 
-    Returns summary metrics including the recovered parameters.
-    """
+    返回包含恢复参数的 summary metrics。"""
     from .calibration_trainer import train_torch, train_numpy, load_responses
 
     print(f"Generating {n_users} synthetic users...")
     population = generate_population(bank, n_users=n_users, questions_per_user=80)
 
-    # Save to a temp file, then load back (clean API boundary)
+    # 保存到临时文件，再加载回来（保持 API 边界干净）
     tmp_path = Path("/tmp/synthetic_calibration_data.json")
     json_data = {
         "users": [
@@ -233,7 +227,7 @@ def synthetic_validation(
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# CLI 入口
 # ---------------------------------------------------------------------------
 
 def main() -> None:
@@ -271,7 +265,7 @@ def main() -> None:
 
 
 # ---------------------------------------------------------------------------
-# NEW: Synthetic training data generator (frequency-weighted sampling)
+# 新增：合成训练数据生成器（frequency-weighted sampling）
 # ---------------------------------------------------------------------------
 
 
@@ -279,18 +273,16 @@ def build_known_vocab(
     bank: VocabBank,
     vocab_size: int,
 ) -> set[str]:
-    """Build a "known word set" for a virtual test-taker with a given ``vocab_size``.
+    """为给定 ``vocab_size`` 的虚拟测试者构建“已知词集合”。
 
-    Words are accumulated from high-frequency buckets first. When a bucket is
-    partially needed, a random subset of its words is taken.
+    词从高频 bucket 开始累计。若某个 bucket 只需部分词，则取其随机子集。
 
     Args:
-        bank: The vocabulary bank.
-        vocab_size: Target vocabulary size for this virtual user.
+        bank: 词库。
+        vocab_size: 虚拟用户的目标词汇量。
 
     Returns:
-        Set of known words.
-    """
+        已知词集合。"""
     bucket_labels_in_order = [
         "1k", "2k", "3k", "5k", "8k", "10k", "15k", "20k", "30k",
     ]
@@ -302,14 +294,14 @@ def build_known_vocab(
         if not items:
             continue
         if remaining >= len(items):
-            # Take the whole bucket
+            # 取整个 bucket
             for item in items:
                 known.add(item.word)
             remaining -= len(items)
         else:
-            # Take a random subset. Use a deterministic seed derived from the
-            # target vocab_size so subsets are reproducible yet decorrelated
-            # from the test-question sampling rng.
+            # 取随机子集。使用由
+            # target vocab_size 派生的确定性 seed，使子集可复现且去相关
+            # 与测试题采样 rng 去相关。
             inner_rng = random.Random(vocab_size * 12345)
             chosen = inner_rng.sample(items, remaining)
             for item in chosen:
@@ -331,41 +323,39 @@ def generate_synthetic_data(
     power: float = 0.5,
     seed: int = 42,
 ) -> dict[int, dict]:
-    """Generate synthetic training data for calibration.
+    """为校准生成合成训练数据。
 
-    For each ``vocab_size``:
-      1. Build a "known word set" (fill from high-frequency buckets up to V)
-      2. Sample N test questions using frequency-weighted distribution
-         (high-frequency words appear more often, like real exams)
-      3. Label each question as known=True/False based on the known set
+    对每个 ``vocab_size``：
+      1. 构建“已知词集合”（从高频 bucket 填充到 V）
+      2. 使用 frequency-weighted distribution 抽样 N 道测试题
+         （高频词更常出现，类似真实考试）
+      3. 根据 known set 将每题标注为 known=True/False
 
     Args:
-        bank: Vocabulary bank.
-        vocab_sizes: List of vocabulary sizes to simulate. Defaults to
-                     ``SYNTHETIC_VOCAB_SIZES``.
-        n_questions: Number of test questions per synthetic user.
-        power: Power-law exponent for test question sampling.
-        seed: Random seed.
+        bank: 词库。
+        vocab_sizes: 要模拟的词汇量列表，默认 ``SYNTHETIC_VOCAB_SIZES``。
+        n_questions: 每个合成用户的测试题数。
+        power: 测试题采样使用的 power-law 指数。
+        seed: 随机种子。
 
     Returns:
         {vocab_size: {"responses": [(word, known), ...],
                       "known_set_size": int,
-                      "known_rate": float}, ...}
-    """
+                      "known_rate": float}, ...}"""
     if vocab_sizes is None:
         vocab_sizes = list(SYNTHETIC_VOCAB_SIZES)
 
     result: dict[int, dict] = {}
 
     for vsize in sorted(vocab_sizes):
-        # Step 1: Build known word set
+        # 步骤 1：构建已知词集合
         known_words = build_known_vocab(bank, vsize)
 
-        # Step 2: Sample test questions (frequency-weighted)
+        # 步骤 2：抽样测试题（frequency-weighted）
         from .interval_sampler import sample_test_questions
         sampled = sample_test_questions(bank, n=n_questions, power=power, seed=seed)
 
-        # Step 3: Label each question
+        # 步骤 3：标注每道题
         responses: list[tuple[str, bool]] = []
         for sw in sampled:
             known = sw.word in known_words
@@ -387,7 +377,7 @@ def generate_synthetic_data(
 def describe_synthetic_dataset(
     data: dict[int, dict],
 ) -> str:
-    """Return a human-readable report of a synthetic dataset."""
+    """返回合成数据集的易读报告。"""
     lines = []
     lines.append(f"Synthetic training data ({len(data)} vocabulary sizes)\n")
     lines.append(f"  {'Vocab':>7s}  {'KnownSet':>9s}  {'Q':>4s}  {'Known':>7s}  {'Known%':>7s}")
@@ -403,7 +393,7 @@ def describe_synthetic_dataset(
 
 
 # ---------------------------------------------------------------------------
-# Synthetic calibration training loop
+# 合成校准训练循环
 # ---------------------------------------------------------------------------
 
 
@@ -414,15 +404,13 @@ def run_synthetic_training(
     power: float = 0.5,
     seed: int = 42,
 ) -> list[dict]:
-    """Run a synthetic training validation.
+    """运行合成训练验证。
 
-    For each ``vocab_size``, generates synthetic test-taker responses and
-    feeds them to the ``VocabEstimator`` to get a prediction, then reports
-    prediction vs actual vocab size.
+    对每个 ``vocab_size``，生成合成测试者 responses，并输入 ``VocabEstimator`` 得到预测，
+    然后报告预测词汇量与实际词汇量。
 
     Returns:
-        List of dicts, one per vocab size, with prediction details.
-    """
+        每个 vocab size 一个 dict，包含预测详情。"""
     from vocab_estimator.config import DEFAULT_CONFIG
     from vocab_estimator.vocab_model import VocabEstimator
 

@@ -1,17 +1,16 @@
-"""Official exam syllabus vocabulary for calibration anchoring.
+"""用于校准锚定的官方考试大纲词汇。
 
-Provides built-in representative word lists for Chinese EFL exam levels:
+提供中国 EFL 考试等级的内置代表词表：
   - 中考 (Zhongkao / Middle School Exam)
   - 高考 (Gaokao / College Entrance Exam)
   - 四级 (CET-4 / College English Test Band 4)
   - 六级 (CET-6 / College English Test Band 6)
 
-Each word list includes representative vocabulary with known rank ranges.
-The purpose is to provide *anchor points* for calibration training:
-the model's predicted known-rate for each official word set should match
-the expected coverage at the corresponding learner level.
+每个词表都包含具有已知 rank 范围的代表词汇。
+目标是为校准训练提供 *anchor points*：
+模型对每个官方词集预测的 known-rate 应匹配对应学习者等级的期望覆盖率。
 
-Usage:
+用法：
     from optim.official_vocab import (
         get_official_vocab_sets,
         match_official_to_bank,
@@ -39,12 +38,12 @@ from vocab_estimator.vocab_bank import VocabBank
 
 _DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
-# Cache for loaded word lists
+# 已加载词表的 cache
 _WORD_LISTS: dict[str, list[str]] | None = None
 
 
 def _load_all_word_lists() -> dict[str, list[str]]:
-    """Load all word lists from data/ JSON files."""
+    """从 data/ JSON 文件加载所有词表。"""
     global _WORD_LISTS
     if _WORD_LISTS is not None:
         return _WORD_LISTS
@@ -67,19 +66,19 @@ def _load_all_word_lists() -> dict[str, list[str]]:
 
 @dataclass(frozen=True)
 class OfficialVocabSet:
-    """Metadata for an official exam vocabulary set."""
+    """官方考试词汇集的元数据。"""
 
-    name: str                          # e.g. "中考", "高考", "CET-4", "CET-6"
-    label_en: str                      # English label
-    expected_vocab_size: int           # Expected total vocabulary at this level
-    rank_range: tuple[int, int]        # Expected rank range in the bank
-    expected_coverage: float           # Expected known-rate at this level (0-1)
+    name: str                          # 例如 "中考"、"高考"、"CET-4"、"CET-6"
+    label_en: str                      # 英文标签
+    expected_vocab_size: int           # 该等级期望总词汇量
+    rank_range: tuple[int, int]        # 词库中的期望 rank 范围
+    expected_coverage: float           # 该等级期望 known-rate（0-1）
     expected_coverage_range: tuple[float, float] = field(default=(0.75, 0.95))
-    weight: float = 3.0                # Loss weight during training
+    weight: float = 3.0                # 训练中的 loss 权重
 
 
 def get_official_vocab_sets() -> dict[str, OfficialVocabSet]:
-    """Return dict of all official vocab sets with metadata."""
+    """返回全部官方词汇集及其元数据 dict。"""
     return {
         "中考": OfficialVocabSet(
             name="中考",
@@ -121,13 +120,13 @@ def get_official_vocab_sets() -> dict[str, OfficialVocabSet]:
 
 
 def get_set_words(set_name: str) -> set[str]:
-    """Get the built-in word list for an official vocab set.
+    """获取官方词汇集的内置词表。
 
     Args:
-        set_name: One of "中考", "高考", "四级", "六级"
+        set_name: "中考"、"高考"、"四级"、"六级" 之一
 
     Returns:
-        Set of lowercase words.
+        小写词集合。
     """
     all_lists = _load_all_word_lists()
     words = all_lists.get(set_name, [])
@@ -137,11 +136,11 @@ def get_set_words(set_name: str) -> set[str]:
 def match_official_to_bank(
     bank: VocabBank,
 ) -> dict[str, OfficialVocabSet]:
-    """Build official vocab sets with bank-matched word lists.
+    """构建带词库匹配词表的官方词汇集。
 
     Returns:
-        Dict mapping set name -> OfficialVocabSet with matched metadata.
-        The ``expected_vocab_size``, ``rank_range`` come from the definition.
+        set name -> OfficialVocabSet 的 dict，包含匹配后的元数据。
+        ``expected_vocab_size``、``rank_range`` 来自定义。
     """
     return get_official_vocab_sets()
 
@@ -151,15 +150,15 @@ def compute_set_coverage(
     set_name: str,
     known_words: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Compute coverage statistics for an official vocab set.
+    """计算官方词汇集的覆盖率统计。
 
     Args:
-        bank: VocabBank to match against.
-        set_name: One of "中考", "高考", "四级", "六级"
-        known_words: Optional set of words the learner knows.
+        bank: 用于匹配的 VocabBank。
+        set_name: "中考"、"高考"、"四级"、"六级" 之一
+        known_words: 学习者已知词的可选集合。
 
     Returns:
-        Dict with coverage metrics.
+        包含覆盖率指标的 dict。
     """
     sets = get_official_vocab_sets()
     info = sets.get(set_name)
@@ -169,7 +168,7 @@ def compute_set_coverage(
     set_words = get_set_words(set_name)
     rank_range = info.rank_range
 
-    # Find matches in the vocab bank
+    # 在词库中查找匹配
     matched: list[tuple[str, int]] = []
     bank_words_by_lemma = {}
     for item in bank.items:
@@ -207,7 +206,7 @@ def compute_set_coverage(
 
 
 def describe_official_vocab(bank: VocabBank) -> str:
-    """Return a full report on all official vocab sets."""
+    """返回所有官方词汇集的完整报告。"""
     lines = []
     lines.append("=== 官方考试词表锚点 ===\n")
 
@@ -226,7 +225,7 @@ def describe_official_vocab(bank: VocabBank) -> str:
     return "\n".join(lines)
 
 
-# ── CLI ──
+# ── CLI 入口 ──
 
 def main() -> None:
     import argparse

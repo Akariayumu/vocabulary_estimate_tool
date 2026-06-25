@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Synthetic-user simulation for the stratified Rasch vocabulary estimator.
+"""分层 Rasch 词汇量估算器的合成用户模拟。
 
-The simulator builds users with a true Rasch ability ``theta``, generates
-responses from the same ``P(known | theta)`` model used by the estimator, runs
-phase 1 plus phase 2 refinement, then evaluates estimate quality against the
-synthetic expected vocabulary.
+模拟器构造具有真实 Rasch 能力 ``theta`` 的用户，使用估算器同款
+``P(known | theta)`` 模型生成 responses，运行 phase 1 加 phase 2 精细化，
+再以合成期望词汇量评估估算质量。
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ DEFAULT_STAGE_VOCAB = PROJECT_ROOT / "data" / "stage_vocab.json"
 
 @dataclass(frozen=True)
 class VocabWord:
-    """Minimal vocabulary-bank entry needed by the simulator."""
+    """模拟器需要的最小词库条目。"""
 
     word: str
     difficulty: float
@@ -41,7 +40,7 @@ class VocabWord:
 
 @dataclass(frozen=True)
 class SyntheticUser:
-    """Synthetic respondent parameterized by true Rasch ability."""
+    """由真实 Rasch 能力参数化的合成答题者。"""
 
     user_id: int
     true_theta: float
@@ -51,7 +50,7 @@ class SyntheticUser:
 
 
 def sigmoid(x: float) -> float:
-    """Numerically stable scalar sigmoid."""
+    """数值稳定的标量 sigmoid。"""
     if x < -40:
         return 0.0
     if x > 40:
@@ -60,13 +59,13 @@ def sigmoid(x: float) -> float:
 
 
 def _logit(p: float) -> float:
-    """Logit transform, clamped to match the estimator's item scale."""
+    """Logit 变换，并做 clamp 以匹配估算器 item 尺度。"""
     p = max(1e-10, min(1.0 - 1e-10, p))
     return math.log(p / (1.0 - p))
 
 
 def load_vocab_bank(stage_vocab_path: str | Path = DEFAULT_STAGE_VOCAB) -> list[VocabWord]:
-    """Load words with difficulty scores from ``stage_vocab.json``."""
+    """从 ``stage_vocab.json`` 加载带 difficulty 分数的词。"""
     path = Path(stage_vocab_path)
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
@@ -84,7 +83,7 @@ def load_vocab_bank(stage_vocab_path: str | Path = DEFAULT_STAGE_VOCAB) -> list[
 
 
 def _difficulty_logits(vocab_bank: Sequence[VocabWord]) -> np.ndarray:
-    """Return estimator-scale item difficulties for a vocabulary bank."""
+    """返回词库中 item 在估算器尺度下的 difficulties。"""
     return np.array(
         [_logit(max(0.001, min(0.999, item.difficulty))) for item in vocab_bank],
         dtype=float,
@@ -92,17 +91,17 @@ def _difficulty_logits(vocab_bank: Sequence[VocabWord]) -> np.ndarray:
 
 
 def _expected_vocab_from_logits(theta: float, difficulty_logits: np.ndarray) -> float:
-    """Expected known-word count under the Rasch response model."""
+    """Rasch response model 下的期望已知词数量。"""
     return float(np.sum(1.0 / (1.0 + np.exp(-np.clip(theta - difficulty_logits, -40.0, 40.0)))))
 
 
 def _expected_vocab(theta: float, vocab_bank: Sequence[VocabWord]) -> float:
-    """Expected vocabulary from ``sum(sigmoid(theta - logit(difficulty)))``."""
+    """根据 ``sum(sigmoid(theta - logit(difficulty)))`` 得到的期望词汇量。"""
     return _expected_vocab_from_logits(theta, _difficulty_logits(vocab_bank))
 
 
 def _theta_for_expected_vocab(target_vocab: int, difficulty_logits: np.ndarray) -> float:
-    """Find true theta whose expected vocabulary is close to ``target_vocab``."""
+    """寻找期望词汇量接近 ``target_vocab`` 的真实 theta。"""
     max_expected = len(difficulty_logits)
     target = max(0.0, min(float(target_vocab), float(max_expected)))
     if target <= 0:
@@ -129,7 +128,7 @@ def generate_synthetic_users(
     true_max: int = 15000,
     seed: int = 42,
 ) -> Iterable[SyntheticUser]:
-    """Generate synthetic users with theta-derived expected vocabularies."""
+    """生成词汇量期望值由 theta 推导的合成用户。"""
     if n_users < 0:
         raise ValueError("n_users must be non-negative")
 
@@ -163,7 +162,7 @@ def simulate_quiz(
     adaptive: bool = True,
     phase2_n_per_class: int = 8,
 ) -> dict[str, Any]:
-    """Run phase 1 + phase 2 and generate Rasch-model responses."""
+    """运行 phase 1 + phase 2，并生成 Rasch-model responses。"""
     sample_rng = random.Random(user.seed)
     response_rng = random.Random(user.seed ^ 0x9E3779B9)
 
@@ -304,7 +303,7 @@ def run_evaluation(
     stage_vocab_path: str | Path = DEFAULT_STAGE_VOCAB,
     quiet: bool = False,
 ) -> dict[str, Any]:
-    """Run the full simulation and write JSON results."""
+    """运行完整模拟并写入 JSON 结果。"""
     vocab_bank = load_vocab_bank(stage_vocab_path)
     quiz = StratifiedQuiz(stage_vocab_path=stage_vocab_path)
 

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Explore Phase-1 question counts for the stratified Rasch quiz.
+"""探索分层 Rasch 测验的 Phase-1 题量。
 
-The experiment reuses the existing synthetic-user framework:
+实验复用现有合成用户框架：
 
-* generate Rasch users with true vocabulary in a configurable range
-* draw one 40-question StratifiedQuiz Phase 1 sample per user
-* score the prefixes [10, 15, 20, 25, 30, 35, 40]
-* fit ability from each prefix only, with no Phase 2 refinement
+* 生成真实词汇量位于可配置范围内的 Rasch 用户
+* 为每个用户抽取一次 40 题 StratifiedQuiz Phase 1 样本
+* 评估前缀 [10, 15, 20, 25, 30, 35, 40]
+* 仅根据每个前缀拟合能力，不做 Phase 2 精细化
 
-Outputs:
+输出：
 
-* JSON with summaries and per-user records
-* Markdown table for reports
-* optional PNG line chart when matplotlib is installed
+* 包含 summary 和逐用户记录的 JSON
+* 用于报告的 Markdown 表格
+* 安装 matplotlib 时可选输出 PNG 折线图
 """
 
 from __future__ import annotations
@@ -52,21 +52,21 @@ DEFAULT_OUTPUT = PROJECT_ROOT / "outputs" / "question_count_exploration.json"
 DEFAULT_MARKDOWN = PROJECT_ROOT / "outputs" / "question_count_exploration.md"
 DEFAULT_PLOT = PROJECT_ROOT / "outputs" / "question_count_exploration.png"
 
-# Front-load broad difficulty coverage for streaming prefixes. The first 15
-# questions cover easy/hard extremes plus the middle bands; the first 20 cover
-# all cluster_20 classes once; questions 21-40 add the second item per class.
+# 为流式前缀前置广泛难度覆盖。前 15 题
+# 覆盖易/难两端和中间带；前 20 题覆盖
+# 所有 cluster_20 类别一次；第 21-40 题为每类加入第二个 item。
 STREAMING_CLUSTER_ORDER = [0, 19, 5, 15, 10, 2, 7, 12, 17, 4, 9, 14, 18, 1, 6, 11, 16, 3, 8, 13]
 
 
 def _answer_item(user: Any, item: dict[str, Any], rng: random.Random) -> tuple[str, bool]:
-    """Generate one Rasch-model response for a synthetic user."""
+    """为合成用户生成一个 Rasch-model response。"""
     d_logit = _logit(max(0.001, min(0.999, float(item["difficulty"]))))
     p_known = sigmoid(user.true_theta - d_logit)
     return item["word"], rng.random() < p_known
 
 
 def _order_phase1_items(items: Sequence[dict[str, Any]], policy: str) -> list[dict[str, Any]]:
-    """Return Phase-1 items in a prefix-friendly or original order."""
+    """按前缀友好顺序或原始顺序返回 Phase-1 items。"""
     if policy == "shuffled":
         return list(items)
     if policy != "streaming":
@@ -93,7 +93,7 @@ def _order_phase1_items(items: Sequence[dict[str, Any]], policy: str) -> list[di
     append_wave()
     append_wave()
 
-    # Defensive fallback in case a future sampler returns non-2-per-class data.
+    # 防御性 fallback，以防未来 sampler 返回非每类 2 题数据。
     for item in items:
         if item["word"] not in seen:
             ordered.append(item)
@@ -106,7 +106,7 @@ def _mean(values: Sequence[float]) -> float:
 
 
 def _summarize_count(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """Compute quality and uncertainty diagnostics for one question count."""
+    """计算某个题量下的质量和不确定性诊断。"""
     metrics = _metrics(records)
     vocab_widths = [r["vocab_ci_high"] - r["vocab_ci_low"] for r in records]
     theta_widths = [r["theta_ci_high"] - r["theta_ci_low"] for r in records]
@@ -137,7 +137,7 @@ def run_experiment(
     plot: str | Path | None = DEFAULT_PLOT,
     quiet: bool = False,
 ) -> dict[str, Any]:
-    """Run the question-count exploration and write result artifacts."""
+    """运行题量探索并写入结果 artifacts。"""
     t0 = time.time()
     counts = sorted({int(c) for c in counts})
     if not counts:
@@ -251,7 +251,7 @@ def run_experiment(
 
 
 def build_markdown_table(result: dict[str, Any]) -> str:
-    """Build a compact Markdown table from experiment summaries."""
+    """根据实验 summaries 构建紧凑 Markdown 表格。"""
     lines = [
         "| 题量 | MAE | RMSE | R² | Corr | 平均偏差 | θ CI宽度 | 词汇CI宽度 | P90误差 |",
         "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -276,10 +276,10 @@ def build_markdown_table(result: dict[str, Any]) -> str:
 
 
 def maybe_write_plot(result: dict[str, Any], path: Path) -> None:
-    """Write MAE/R² line chart if matplotlib is available."""
+    """若 matplotlib 可用，则写入 MAE/R² 折线图。"""
     try:
         import matplotlib.pyplot as plt
-    except Exception as exc:  # pragma: no cover - optional dependency
+    except Exception as exc:  # pragma: no cover - 可选依赖
         print(f"skip plot: matplotlib unavailable ({exc})", file=sys.stderr)
         return
 

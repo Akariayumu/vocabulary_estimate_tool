@@ -1,4 +1,4 @@
-"""Document coverage analysis based on lemma-frequency ranks."""
+"""基于 lemma-frequency ranks 的文档覆盖率分析。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 
 
 class DocumentCoverageAnalyzer:
-    """Measure how much of a document is covered by top-N known word ranks."""
+    """衡量文档中有多少内容被 top-N 已知词 rank 覆盖。"""
 
     def __init__(
         self,
@@ -28,7 +28,7 @@ class DocumentCoverageAnalyzer:
         self.config = config
 
     def analyze_paths(self, paths: Iterable[str | Path]) -> dict:
-        """Analyze several documents and return per-file plus aggregate coverage."""
+        """分析多个文档，并返回逐文件覆盖率和汇总覆盖率。"""
 
         per_file = {}
         all_tokens: list[str] = []
@@ -43,12 +43,12 @@ class DocumentCoverageAnalyzer:
         }
 
     def analyze_text(self, text: str) -> dict:
-        """Analyze a raw document string."""
+        """分析原始文档字符串。"""
 
         return self.coverage_from_lemmas(self.extract_lemmas(text))
 
     def extract_lemmas(self, text: str) -> list[str]:
-        """Tokenize text, remove proper nouns/abbreviations, and lemmatize."""
+        """对文本分词，移除专有名词/缩写，并执行 lemmatize。"""
 
         lemmas: list[str] = []
         for match in TOKEN_RE.finditer(text):
@@ -61,7 +61,7 @@ class DocumentCoverageAnalyzer:
         return lemmas
 
     def coverage_from_lemmas(self, lemmas: Iterable[str]) -> dict:
-        """Return top-N coverage and 95%/98% rank thresholds."""
+        """返回 top-N 覆盖率以及 95%/98% rank 阈值。"""
 
         tokens = list(lemmas)
         total = len(tokens)
@@ -107,8 +107,8 @@ class DocumentCoverageAnalyzer:
             return True
         if self.lemmatizer.is_abbreviation(token):
             return True
-        # Drop likely proper nouns. This intentionally treats title-case words as
-        # names, which is conservative for document-coverage calibration.
+        # 丢弃疑似专有名词。这里有意将 title-case 词视为人名/名称，
+        # 对文档覆盖率校准来说更保守。
         if self.lemmatizer.is_proper_like(token):
             return True
         return False

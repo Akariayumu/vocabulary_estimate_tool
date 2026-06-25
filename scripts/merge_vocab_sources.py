@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Merge three vocabulary sources:
-  A. pep_textbook - xls extracted stage vocab
-  B. mahavivo     - GitHub exam syllabus wordlists
-  C. official_vocab - built-in exam vocab sets
+合并三个词汇来源：
+  A. pep_textbook - 从 xls 提取的阶段词库
+  B. mahavivo     - GitHub 考试大纲词表
+  C. official_vocab - 内置考试词汇集
 
-Produces updated stage_vocab.json with source tracking and confidence scoring.
+生成带来源追踪和置信度评分的更新版 stage_vocab.json。
 """
 
 import json
@@ -18,7 +18,7 @@ DATA_DIR = Path.home() / "stu/vocab_estimator/data"
 OPTIM_DIR = Path.home() / "stu/vocab_estimator/optim"
 OUTPUT = DATA_DIR / "stage_vocab.json"
 
-# ── Load Source A: pep_textbook (existing stage_vocab.json) ──
+# ── 加载来源 A：pep_textbook（现有 stage_vocab.json）──
 
 with open(OUTPUT) as f:
     existing = json.load(f)
@@ -26,12 +26,12 @@ with open(OUTPUT) as f:
 pep_stages_raw = existing["stages"]
 pep_wts = existing["word_to_stage"]
 
-# Normalize: pep words might have spaces/punctuation differences
+# 归一化：pep 词可能存在空格/标点差异
 pep_words_by_stage = {}
 for sname, sdata in pep_stages_raw.items():
     pep_words_by_stage[sname] = [w.strip() for w in sdata["words"]]
 
-# Build pep word set per stage
+# 按阶段构建 pep 词集合
 pep_word_sets = {}
 for sname, words in pep_words_by_stage.items():
     pep_word_sets[sname] = {w.lower().strip() for w in words}
@@ -40,7 +40,7 @@ print("=== Source A: pep_textbook ===")
 for sname, ws in pep_word_sets.items():
     print(f"  {sname}: {len(ws)} words")
 
-# ── Load Source B: mahavivo ──
+# ── 加载来源 B：mahavivo ──
 
 def load_mahavivo(path):
     with open(path) as f:
@@ -53,16 +53,16 @@ print("\n=== Source B: mahavivo ===")
 print(f"  gaokao.txt → senior: {len(gaokao_maha)} words")
 print(f"  cet6.txt → cet6: {len(cet6_maha)} words")
 
-# ── Load Source C: official_vocab ──
+# ── 加载来源 C：official_vocab ──
 
 def extract_official_var(source, var_name):
-    """Extract word set from a variable like ZHONGKAO_WORDS = ( "..." )"""
+    """从 ZHONGKAO_WORDS = ( "..." ) 这类变量中提取词集合"""
     idx = source.find(f'{var_name} = ')
     if idx < 0:
         idx = source.find(f'{var_name}= ')
     assert idx >= 0, f"Could not find {var_name}"
     rest = source[idx:]
-    # Find opening paren of the tuple
+    # 查找 tuple 的左括号
     paren_start = rest.find('(')
     depth = 0
     all_strings = []
@@ -103,7 +103,7 @@ def extract_official_var(source, var_name):
     return words
 
 def extract_added_words(source, var_name):
-    """Extract the second tuple from VAR = VAR2 + ( ... )"""
+    """从 VAR = VAR2 + ( ... ) 中提取第二个 tuple"""
     idx = source.find(f'{var_name} = ')
     assert idx >= 0, f"Could not find {var_name}"
     rest = source[idx:]
@@ -164,7 +164,7 @@ print(f"  GAOKAO_WORDS → senior: {len(gaokao_ov)} words")
 print(f"  CET4_WORDS → cet4: {len(cet4_ov)} words")
 print(f"  CET6_WORDS → cet6: {len(cet6_ov)} words")
 
-# ── Stage ordering (earliest = lowest priority number) ──
+# ── 阶段排序（越早 = priority 数字越低）──
 
 STAGE_ORDER = [
     "primary_3", "primary_4", "primary_5", "primary_6",
@@ -180,34 +180,34 @@ STAGE_LABELS.update({
     "senior": "高中", "cet4": "大学四级", "cet6": "大学六级", "ielts": "雅思"
 })
 
-# ── Source mapping: what stage each external source maps to ──
+# ── 来源映射：每个外部来源映射到哪个阶段 ──
 
-# mahavivo: gaokao → senior, cet6.txt → cet6
+# mahavivo 映射：gaokao → senior，cet6.txt → cet6
 MAHA_STAGE = {
-    # (source_name, stage)
+# (来源名, stage)
 }
 MAHA_WORDS = {
     "senior": gaokao_maha,
     "cet6": cet6_maha,
 }
 
-# official_vocab: ZHONGKAO → junior (all junior stages), GAOKAO → senior, CET4 → cet4, CET6 → cet6
-# For ZHONGKAO, the words could be in junior_7, junior_8, or junior_9
-# We assign them to the first junior stage they appear in if already present,
-# or the earliest matching stage
+# official_vocab：ZHONGKAO → junior（全部 junior 阶段），GAOKAO → senior，CET4 → cet4，CET6 → cet6
+# 对 ZHONGKAO，词可能属于 junior_7、junior_8 或 junior_9
+# 如果词已存在，则分配到它首次出现的 junior 阶段；
+# 否则分配到最早匹配阶段
 OV_WORDS = {
     ("zhongkao", "junior_7"): zhongkao_ov,
     ("gaokao", "senior"): gaokao_ov,
     ("cet4", "cet4"): cet4_ov,
     ("cet6", "cet6"): cet6_ov,
 }
-# Also give zhongkao words a shot at junior_8 and junior_9
+# 也让 zhongkao 词尝试匹配 junior_8 和 junior_9
 OV_WORDS[("zhongkao", "junior_8")] = zhongkao_ov
 OV_WORDS[("zhongkao", "junior_9")] = zhongkao_ov
 
-# ── Build merged word_to_stage ──
+# ── 构建合并后的 word_to_stage ──
 
-# Start from pep_textbook data
+# 从 pep_textbook 数据开始
 word_to_stage = {}
 for word, info in pep_wts.items():
     w = word.strip().lower()
@@ -218,16 +218,16 @@ for word, info in pep_wts.items():
         "sources": ["pep_textbook"],
     }
 
-# Pre-populate with pep sources tracking
-# Also record pep_stage_precedence
-pep_stage_precedence = {}  # word -> earliest stage from pep
+# 预填充 pep 来源追踪
+# 同时记录 pep_stage_precedence
+pep_stage_precedence = {}  # word -> pep 中最早阶段
 for sname, words in pep_word_sets.items():
     for w in words:
         wl = w.lower().strip()
         if wl not in pep_stage_precedence or STAGE_PRIORITY[sname] < STAGE_PRIORITY[pep_stage_precedence[wl]]:
             pep_stage_precedence[wl] = sname
 
-# ── Add mahavivo words ──
+# ── 添加 mahavivo 词 ──
 
 STAGE_SOURCE_MAP = {
     "senior": ("mahavivo", "gaokao.txt"),
@@ -240,16 +240,16 @@ for stage, words in MAHA_WORDS.items():
         wl = w.strip().lower()
         if wl in word_to_stage:
             info = word_to_stage[wl]
-            # Add source if not already
+            # 如果尚未记录，则添加来源
             if "mahavivo" not in info.get("sources", []):
                 info.setdefault("sources", []).append("mahavivo")
-            # Update all_stages
+            # 更新 all_stages
             if stage not in info.get("all_stages", []):
                 info.setdefault("all_stages", []).append(stage)
                 info["all_stages"].sort(key=lambda s: STAGE_PRIORITY.get(s, 99))
-            # Keep first_stage (earliest)
+            # 保留 first_stage（最早阶段）
         else:
-            # New word from mahavivo
+            # 来自 mahavivo 的新词
             word_to_stage[wl] = {
                 "first_stage": stage,
                 "all_stages": [stage],
@@ -257,34 +257,34 @@ for stage, words in MAHA_WORDS.items():
                 "sources": [src_name],
             }
 
-# ── Special handling: mahavivo cet6 REPLACES pep_textbook cet6 ──
-# Words that were ONLY in pep_textbook cet6 (not in any earlier stage, not in mahavivo cet6)
-# should be removed from cet6 stage.
-# But they shouldn't be deleted from word_to_stage if they exist elsewhere.
-# If they were ONLY in cet6, they stay but are flagged.
+# ── 特殊处理：mahavivo cet6 替换 pep_textbook cet6 ──
+# 仅出现在 pep_textbook cet6 的词（不在任何更早阶段，也不在 mahavivo cet6 中）
+# 应从 cet6 阶段移除。
+# 但如果它们还存在于别处，不应从 word_to_stage 删除。
+# 如果它们只在 cet6 中，则保留但打标。
 
 for w in list(pep_word_sets.get("cet6", set())):
     wl = w.lower().strip()
     if wl not in cet6_maha and wl in word_to_stage:
         info = word_to_stage[wl]
-        # Remove cet6 from all_stages if it was from pep_textbook only
-        # But only if the word exists in no earlier stage
+        # 若 cet6 仅来自 pep_textbook，则从 all_stages 移除 cet6
+        # 但仅当该词不存在于任何更早阶段时这样做
         if "cet6" in info.get("all_stages", []):
-            # Check if word exists in any earlier stage
+            # 检查词是否存在于任何更早阶段
             other_stages = [s for s in info["all_stages"] if s != "cet6"]
             if not other_stages:
-                # Word was ONLY in cet6 stage from pep_textbook
-                # Keep it but note it's pep-only, add "pep_cet6_removed" marker
+                # 该词仅来自 pep_textbook 的 cet6 阶段
+                # 保留它，但注明它是 pep-only，并添加 "pep_cet6_removed" 标记
                 info.setdefault("notes", []).append("removed_from_cet6_by_mahavivo")
             else:
-                # Word exists in another stage too, just remove cet6 from all_stages
+                # 词也存在于其他阶段时，只从 all_stages 移除 cet6
                 info["all_stages"] = other_stages
-                # If first_stage was cet6, update it (shouldn't happen if word exists in earlier stage)
+                # 如果 first_stage 是 cet6，则更新它（若词存在于更早阶段则不应发生）
                 if info["first_stage"] == "cet6" and other_stages:
                     info["first_stage"] = other_stages[0]
                     info["first_priority"] = STAGE_PRIORITY[other_stages[0]]
 
-# ── Add official_vocab words ──
+# ── 添加 official_vocab 词 ──
 
 for (ov_name, stage), words in OV_WORDS.items():
     for w in words:
@@ -294,15 +294,15 @@ for (ov_name, stage), words in OV_WORDS.items():
             if "official_vocab" not in info.get("sources", []):
                 info.setdefault("sources", []).append("official_vocab")
             if ov_name == "zhongkao":
-                # For zhongkao words, try to apply to junior stages
-                # Only add if word is already in some junior stage or earlier
-                pass  # don't force stage change
+                # 对 zhongkao 词，尝试应用到 junior 阶段
+                # 仅当词已存在于某个 junior 阶段或更早阶段时添加
+                pass  # 不强制改变阶段
             else:
                 if stage not in info.get("all_stages", []):
                     info.setdefault("all_stages", []).append(stage)
                     info["all_stages"].sort(key=lambda s: STAGE_PRIORITY.get(s, 99))
         else:
-            # New word from official_vocab
+            # 来自 official_vocab 的新词
             word_to_stage[wl] = {
                 "first_stage": stage,
                 "all_stages": [stage],
@@ -310,10 +310,10 @@ for (ov_name, stage), words in OV_WORDS.items():
                 "sources": ["official_vocab"],
             }
 
-# ── Rebuild stages from word_to_stage ──
+# ── 根据 word_to_stage 重建 stages ──
 
-# Build new stage word lists
-# Keep original behavior: each word appears in ALL stages it belongs to
+# 构建新的阶段词表
+# 保持原行为：每个词出现在它所属的全部 stages 中
 new_stages = {}
 for stage in STAGE_ORDER:
     stage_words = []
@@ -327,9 +327,9 @@ for stage in STAGE_ORDER:
         "words": sorted(stage_words),
     }
 
-# ── Add source_confidence to word_to_stage ──
+# ── 向 word_to_stage 添加 source_confidence ──
 
-# Also handle the cet6 REPLACEMENT properly
+# 同时正确处理 cet6 替换
 for w, info in word_to_stage.items():
     sources = info.get("sources", [])
     if len(sources) >= 2:
@@ -342,26 +342,26 @@ for w, info in word_to_stage.items():
     else:
         info["source_confidence"] = "low"
 
-# ── Fix: for cet6, we need to ensure mahavivo words are properly represented ──
-# The cet6 stage should have the union of mahavivo cet6 words and words assigned to cet6
-# from other sources. Actually, re-read the requirement:
+# ── 修复：对 cet6，需确保 mahavivo 词被正确表示 ──
+# cet6 阶段应包含 mahavivo cet6 词和分配到 cet6 的词的并集
+# 来自其他来源。重新阅读需求后可知：
 # "以 mahavivo 为权威：cet6.txt (8028词) 替换 xls 提取的 CET-6 (5518词)"
-# This means the cet6.stage words should BE the mahavivo cet6 words.
+# 这意味着 cet6.stage 词应当就是 mahavivo cet6 词。
 
-# For the cet6 stage specifically, rebuild from mahavivo
+# 对 cet6 阶段，专门从 mahavivo 重建
 cet6_stage_words = set()
 for w in cet6_maha:
     wl = w.strip().lower()
     if wl in word_to_stage:
-        # Word exists somewhere - if it was in an earlier stage, it stays there
-        # But it also appears in cet6
+        # 词存在于某处：若它在更早阶段，则保留在那里
+        # 但它也会出现在 cet6 中
         info = word_to_stage[wl]
         if "cet6" not in info["all_stages"]:
             info["all_stages"].append("cet6")
             info["all_stages"].sort(key=lambda s: STAGE_PRIORITY.get(s, 99))
         if "mahavivo" not in info.get("sources", []):
             info.setdefault("sources", []).append("mahavivo")
-        # Keep first_stage (earliest)
+        # 保留 first_stage（最早阶段）
     else:
         word_to_stage[wl] = {
             "first_stage": "cet6",
@@ -372,7 +372,7 @@ for w in cet6_maha:
         }
     cet6_stage_words.add(wl)
 
-# Also add official_vocab cet6 words that might not be in mahavivo
+# 同时添加可能不在 mahavivo 中的 official_vocab cet6 词
 for w in cet6_ov:
     wl = w.strip().lower()
     if wl not in word_to_stage:
@@ -390,7 +390,7 @@ for w in cet6_ov:
         if "official_vocab" not in info.get("sources", []):
             info.setdefault("sources", []).append("official_vocab")
 
-# Build new stages again after fixing cet6
+# 修复 cet6 后再次构建新 stages
 new_stages = {}
 for stage in STAGE_ORDER:
     stage_words = []
@@ -404,7 +404,7 @@ for stage in STAGE_ORDER:
         "words": sorted(stage_words),
     }
 
-# ── Rebuild overlap matrix ──
+# ── 重建 overlap matrix ──
 
 overlap_matrix = {}
 for s1 in STAGE_ORDER:
@@ -418,9 +418,9 @@ for s1 in STAGE_ORDER:
         if overlap > 0:
             overlap_matrix[s1][s2] = overlap
 
-# ── Build word_to_stage final (including source_confidence) ──
+# ── 构建最终 word_to_stage（包含 source_confidence）──
 
-# Rebuild final word to stage
+# 重建最终 word_to_stage
 final_word_to_stage = {}
 for w, info in word_to_stage.items():
     sources = info.get("sources", ["pep_textbook"])
@@ -436,7 +436,7 @@ for w, info in word_to_stage.items():
         final_info["notes"] = info["notes"]
     final_word_to_stage[w] = final_info
 
-# ── Build meta ──
+# ── 构建 meta ──
 
 meta = {
     "sources": {
@@ -454,7 +454,7 @@ meta = {
     }
 }
 
-# ── Build output ──
+# ── 构建输出 ──
 
 output = {
     "meta": meta,
@@ -468,13 +468,13 @@ with open(OUTPUT, "w", encoding="utf-8") as f:
 
 print(f"\n✅ Merged vocab written to {OUTPUT}")
 
-# ── Statistics ──
+# ── 统计 ──
 
 print("\n" + "=" * 60)
 print("MERGE REPORT")
 print("=" * 60)
 
-# Before/After comparison
+# 前后对比
 print("\n--- Stage Word Counts: Before vs After ---")
 print(f"{'Stage':<15} {'Before':>8} {'After':>8} {'Δ':>8}")
 print("-" * 42)
@@ -491,9 +491,9 @@ total_delta = total_after - total_before
 print("-" * 42)
 print(f"{'TOTAL':<15} {total_before:>8} {total_after:>8} {total_delta:+>8}")
 
-# Source coverage matrix
+# 来源覆盖矩阵
 print("\n--- Source Coverage Matrix ---")
-# Count how many words have each source combination
+# 统计每种来源组合包含多少词
 source_counts = defaultdict(int)
 source_stage_counts = defaultdict(lambda: defaultdict(int))
 
@@ -510,7 +510,7 @@ for combo, count in sorted(source_counts.items(), key=lambda x: -x[1]):
     combo_str = ", ".join(combo)
     print(f"{combo_str:<45} {count:>8}")
 
-# Per-source total
+# 每个来源总数
 print(f"\n--- Per-Source Totals ---")
 source_totals = defaultdict(int)
 for w, info in final_word_to_stage.items():
@@ -519,7 +519,7 @@ for w, info in final_word_to_stage.items():
 for src, cnt in sorted(source_totals.items(), key=lambda x: -x[1]):
     print(f"  {src:<20}: {cnt:>6} words")
 
-# Confidence distribution
+# 置信度分布
 print(f"\n--- Source Confidence Distribution ---")
 conf_dist = defaultdict(int)
 for w, info in final_word_to_stage.items():
@@ -527,24 +527,24 @@ for w, info in final_word_to_stage.items():
 for conf, cnt in sorted(conf_dist.items()):
     print(f"  {conf:<10}: {cnt:>6} words")
 
-# Conflicts: words that appear in different stages across different sources
-# A conflict is when the same word is in different stages from different sources
-# We already handle this by taking the earliest stage, but let's report
+# 冲突：在不同来源中出现在不同阶段的词
+# 冲突指同一个词在不同来源中对应不同阶段
+# 我们已通过选取最早阶段处理此问题，但仍进行报告
 print("\n--- Stage Assignment Conflicts (word in different stage from different sources) ---")
 
-# Build: for each word, what stage does each source assign it to?
-# pep_textbook already has stages
-# mahavivo: gaokao→senior, cet6→cet6
-# official_vocab: zhongkao→junior_7/8/9, gaokao→senior, cet4→cet4, cet6→cet6
+# 构建：每个来源给每个词分配了什么阶段？
+# pep_textbook 已有 stages
+# mahavivo 映射：gaokao→senior，cet6→cet6
+# official_vocab 映射：zhongkao→junior_7/8/9，gaokao→senior，cet4→cet4，cet6→cet6
 
 word_source_stage = defaultdict(list)
 
-# pep_textbook
+# pep_textbook 来源
 for w, info in pep_wts.items():
     wl = w.strip().lower()
     word_source_stage[wl].append(("pep_textbook", info["first_stage"]))
 
-# mahavivo
+# mahavivo 来源
 for w in gaokao_maha:
     wl = w.strip().lower()
     word_source_stage[wl].append(("mahavivo", "senior"))
@@ -552,10 +552,10 @@ for w in cet6_maha:
     wl = w.strip().lower()
     word_source_stage[wl].append(("mahavivo", "cet6"))
 
-# official_vocab
+# official_vocab 来源
 for w in zhongkao_ov:
     wl = w.strip().lower()
-    # Assign to the matching pep stage if exists, else junior_9
+    # 若存在匹配的 pep 阶段则分配到该阶段，否则分配到 junior_9
     if wl in pep_stage_precedence:
         pep_stage = pep_stage_precedence[wl]
         if pep_stage in ("junior_7", "junior_8", "junior_9", "primary_3", "primary_4", "primary_5", "primary_6"):
@@ -566,7 +566,7 @@ for w in zhongkao_ov:
         word_source_stage[wl].append(("official_vocab", "junior_9"))
 for w in gaokao_ov:
     wl = w.strip().lower()
-    if wl not in zhongkao_ov:  # only add for words unique to gaokao tier
+    if wl not in zhongkao_ov:  # 只为 gaokao tier 独有词添加
         word_source_stage[wl].append(("official_vocab", "senior"))
 for w in cet4_ov:
     wl = w.strip().lower()
@@ -577,13 +577,13 @@ for w in cet6_ov:
     if wl not in cet4_ov:
         word_source_stage[wl].append(("official_vocab", "cet6"))
 
-# Find conflicts
+# 查找冲突
 conflict_count = 0
 for w, assignments in word_source_stage.items():
     if len(assignments) >= 2:
         stages = set(a[1] for a in assignments)
         if len(stages) >= 2:
-            # This word is assigned to different stages by different sources
+            # 该词被不同来源分配到不同阶段
             if conflict_count < 30:
                 print(f"  '{w}': ", end="")
                 for src, stg in assignments:
@@ -593,7 +593,7 @@ for w, assignments in word_source_stage.items():
 
 print(f"  Total conflicts: {conflict_count}")
 
-# Also report: words removed from cet6 by mahavivo replacement
+# 同时报告：因 mahavivo 替换而从 cet6 移除的词
 removed_from_cet6 = []
 for w, info in final_word_to_stage.items():
     if "notes" in info and "removed_from_cet6_by_mahavivo" in info.get("notes", []):
@@ -602,7 +602,7 @@ print(f"\nWords removed from cet6 stage (mahavivo replacement): {len(removed_fro
 if removed_from_cet6:
     print(f"  Sample: {sorted(removed_from_cet6)[:20]}")
 
-# Summary
+# 总结
 print("\n" + "=" * 60)
 print("SUMMARY")
 print("=" * 60)

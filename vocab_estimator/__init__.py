@@ -1,4 +1,4 @@
-"""English vocabulary size estimation toolkit."""
+"""英语词汇量估算工具包。"""
 
 from .config import DEFAULT_CONFIG, EstimatorConfig
 from .vocab_bank import VocabBank

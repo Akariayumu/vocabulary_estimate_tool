@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract GloVe 300d embeddings for all words in stage_vocab.json."""
+"""为 stage_vocab.json 中所有词提取 GloVe 300d embeddings。"""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def download_glove(glove_path: Path, force: bool = False) -> None:
-    """Download and extract GloVe 840B 300d if not present."""
+    """如果不存在，则下载并解压 GloVe 840B 300d。"""
     if glove_path.exists() and not force:
         print(f"GloVe file exists at {glove_path}, skipping download.")
         return
@@ -80,12 +80,12 @@ def download_glove(glove_path: Path, force: bool = False) -> None:
         zf.extractall(glove_path.parent)
     print(f"Extracted to {glove_path}")
 
-    # Clean up zip
+    # 清理 zip
     zip_path.unlink()
 
 
 def load_glove_vocab(glove_path: Path, dim: int = 300) -> dict[str, int]:
-    """Return {word: index} from the GloVe file (reading header only)."""
+    """从 GloVe 文件返回 {word: index}（只读取 header）。"""
     vocab: dict[str, int] = {}
     with open(glove_path, "r", encoding="utf-8") as f:
         for idx, line in enumerate(f):
@@ -99,7 +99,7 @@ def extract_embeddings(
     words: list[str],
     dim: int = 300,
 ) -> tuple[np.ndarray, dict[str, int], list[str]]:
-    """Extract embeddings for the given word list from GloVe file.
+    """从 GloVe 文件中提取给定词表的 embeddings。
 
     Returns:
         (embedding_matrix, word_to_idx, oov_words)
@@ -107,7 +107,7 @@ def extract_embeddings(
     print(f"Loading GloVe from {glove_path} ...")
     t0 = time.time()
 
-    # Build GloVe embedding dict
+    # 构建 GloVe embedding dict
     glove_emb: dict[str, np.ndarray] = {}
     line_count = 0
     with open(glove_path, "r", encoding="utf-8") as f:
@@ -121,7 +121,7 @@ def extract_embeddings(
 
     print(f"Loaded {len(glove_emb)} embeddings from {line_count} lines ({time.time() - t0:.0f}s)")
 
-    # Match our words
+    # 匹配我们的词
     word_to_idx: dict[str, int] = {}
     embeddings: list[np.ndarray] = []
     oov_words: list[str] = []
@@ -150,14 +150,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Download if needed
+    # 需要时下载
     download_glove(args.glove_path, force=args.force_download)
 
     if not args.glove_path.exists():
         print(f"Error: GloVe file not found at {args.glove_path}", file=sys.stderr)
         return 1
 
-    # Load stage vocab words
+    # 加载 stage vocab 词
     with open(args.stage_vocab, encoding="utf-8") as f:
         data = json.load(f)
 
@@ -165,10 +165,10 @@ def main(argv: list[str] | None = None) -> int:
     words = list(word_to_stage.keys())
     print(f"Stage vocab: {len(words)} words")
 
-    # Extract embeddings
+    # 提取 embeddings
     matrix, word_to_idx, oov = extract_embeddings(args.glove_path, words, dim=args.dim)
 
-    # Save outputs
+    # 保存 outputs
     npy_path = args.output_dir / "word_embeddings_300d.npy"
     index_path = args.output_dir / "word_embeddings_index.json"
     oov_path = args.output_dir / "word_embeddings_oov.json"

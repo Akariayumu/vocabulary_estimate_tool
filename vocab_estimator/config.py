@@ -1,7 +1,6 @@
-"""Configuration for the vocabulary estimator.
+"""词汇量估算器配置。
 
-All thresholds are centralized here so experiments can tune the model without
-touching the implementation modules.
+所有阈值集中在这里，便于实验调参而不需要改动实现模块。
 """
 
 from __future__ import annotations
@@ -11,14 +10,14 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class EstimatorConfig:
-    """Runtime configuration for vocabulary bank construction and estimation."""
+    """词库构建与估算流程的运行时配置。"""
 
-    random_seed: int = 0  # 0 = use system entropy, non-zero = fixed for reproducibility
+    random_seed: int = 0  # 0 = 使用系统熵，非零值 = 固定随机种子以便复现
     vocab_size: int = 30_000
     min_vocab_size: int = 20_000
 
-    # Bucket labels mean "words up to this frequency rank". The actual bucket
-    # intervals are (previous_boundary, boundary].
+    # bucket 标签表示“频率排名不超过该边界的词”。实际区间为
+    # 实际区间：(previous_boundary, boundary]。
     bucket_boundaries: tuple[int, ...] = (
         1_000,
         2_000,
@@ -58,15 +57,15 @@ class EstimatorConfig:
 
     coverage_targets: tuple[float, float] = (0.95, 0.98)
 
-    # Vocabulary size calibration based on published research
-    # Nation (2006): ~20,000 word families for native speakers
-    # Goulden, Nation & Read (1990): ~20,000 for university graduates
-    # Milton (2009): Chinese EFL learners max ~9,000-10,000
-    # CET-6 threshold: ~6,000-7,000; TEM-8 threshold: ~10,000-13,000
+    # 基于公开研究的词汇量校准
+    # Nation (2006)：母语者约 20,000 个 word families
+    # Goulden, Nation & Read (1990)：大学毕业生约 20,000
+    # Milton (2009)：中国 EFL 学习者上限约 9,000-10,000
+    # CET-6 阈值：约 6,000-7,000；TEM-8 阈值：约 10,000-13,000
     calibration_native_max: int = 20_000
     calibration_ceiling: int = 22_000
-    calibration_k: float = 0.0000691  # tanh saturation rate
-    #   k=0.0000691: calibrated = max_v * tanh(k * raw), then piecewise
+    calibration_k: float = 0.0000691  # tanh 饱和速率
+    #   k=0.0000691：calibrated = max_v * tanh(k * raw)，再做分段校准
     #   raw 21303 (all-correct) → cal 18049   (母语者水平)
     #   raw 10000 → cal 10335   (专业/母语级)
     #   raw 8000  → cal  7877   (六级+ / 考研)
@@ -78,45 +77,45 @@ class EstimatorConfig:
     min_word_len: int = 2
     fallback_rank_step: int = 100
 
-    # Beta prior parameters for Bayesian smoothing of bucket known-rates
-    # Each bucket's prior is interpolated between beta_prior_max_knowledge
-    # (high-frequency / low-rank) and beta_prior_min_knowledge
-    # (low-frequency / high-rank) using bucket index normalised to [0, 1].
-    # bucket_alpha = prior_alpha_base + interpolated_knowledge_counts
-    # bucket_beta  = prior_beta_base  + (1 - interpolated_knowledge_counts)
+    # 用于 bucket 已知率 Bayesian smoothing 的 Beta prior 参数
+    # 每个 bucket 的 prior 会按归一化到 [0, 1] 的 bucket 索引，在
+    # beta_prior_max_knowledge（高频 / 低 rank）和
+    # beta_prior_min_knowledge（低频 / 高 rank）之间插值。
+    # bucket_alpha 公式 = prior_alpha_base + interpolated_knowledge_counts
+    # bucket_beta  公式 = prior_beta_base  + (1 - interpolated_knowledge_counts)
     beta_prior_alpha_base: float = 0.5
     beta_prior_beta_base: float = 0.5
     beta_prior_max_knowledge: float = 4.0
     beta_prior_min_knowledge: float = 0.5
 
-    # --- Weighted logistic fitting (方案 A) ---
-    # When enabled, each (word, known) sample is weighted by frequency rank.
-    # High-rank (rare) words get lower weight, so the model prioritises
-    # getting common words right.  This produces a more conservative estimate.
+    # --- Weighted logistic fitting（方案 A）---
+    # 启用后，每个 (word, known) 样本会按频率 rank 加权。
+    # 高 rank（罕见）词权重更低，让模型优先拟合常见词。
+    # 这会得到更保守的估算。
     enable_weighted_fitting: bool = True
 
-    # Weight formula: w = 1 / (1 + log2(max(rank, 10) / 10))
-    # Effective only when enable_weighted_fitting is True.
+    # 权重公式：w = 1 / (1 + log2(max(rank, 10) / 10))
+    # 仅在 enable_weighted_fitting 为 True 时生效。
 
-    # --- Piecewise linear calibration (方案 B) ---
-    # Applied AFTER the tanh stage. Compresses the mid-range (3000-8000)
-    # by 55% to keep ~四级 students around 4000-5000, then expands
-    # the upper range by 28% so all-correct reaches ~18000.
-    # Segments:
-    #   [0, 3000]    → slope 1.00  (identity)
-    #   [3000, 8000]  → slope 0.45  (mid-range compression)
-    #   [8000, 22000] → slope 1.28  (high-end boost)
+    # --- 分段线性校准（方案 B）---
+    # 在 tanh 阶段之后应用。将中段（3000-8000）压缩 55%，
+    # 让约四级水平的学生落在 4000-5000 左右；再把高段放大 28%，
+    # 使全对结果可达到约 18000。
+    # 分段：
+    #   [0, 3000]    → slope 1.00（恒等）
+    #   [3000, 8000]  → slope 0.45（中段压缩）
+    #   [8000, 22000] → slope 1.28（高段增强）
     enable_piecewise_calibration: bool = True
 
-    # Each entry is (upper_boundary, slope_for_segment).
-    # The first segment always starts at 0 with the first entry's slope.
+    # 每项为 (upper_boundary, slope_for_segment)。
+    # 第一个分段始终从 0 开始，并使用第一项的 slope。
     piecewise_knots: tuple[tuple[int, float], ...] = (
         (3_000, 1.00),
         (8_000, 0.45),
         (22_000, 1.28),
     )
 
-    # Two-stage adaptive testing parameters
+    # 两阶段 adaptive testing 参数
     phase1_question_count: int = 30
     enable_phase2: bool = False
     stage2_boundary_low: float = 0.20
@@ -128,7 +127,7 @@ DEFAULT_CONFIG = EstimatorConfig()
 
 
 def bucket_label(boundary: int) -> str:
-    """Return a compact display label for a rank bucket boundary."""
+    """返回 rank bucket 边界的紧凑显示标签。"""
 
     if boundary % 1000 == 0:
         return f"{boundary // 1000}k"
@@ -136,11 +135,11 @@ def bucket_label(boundary: int) -> str:
 
 
 def bucket_beta_prior(bucket_index: int, n_buckets: int, config: EstimatorConfig = DEFAULT_CONFIG) -> tuple[float, float]:
-    """Return (alpha, beta) Beta prior pseudocounts for a frequency bucket.
+    """返回频率 bucket 的 (alpha, beta) Beta prior 伪计数。
 
-    Low-index buckets (high frequency → low rank) get a knowledge-leaning prior.
-    High-index buckets (low frequency → high rank) get an ignorance-leaning prior.
-    Interpolation is linear by bucket index.
+    低索引 bucket（高频 → 低 rank）使用偏“已知”的 prior。
+    高索引 bucket（低频 → 高 rank）使用偏“未知”的 prior。
+    插值按 bucket 索引线性进行。
     """
     t = bucket_index / max(n_buckets - 1, 1)
     knowledge_pseudo = config.beta_prior_max_knowledge + t * (

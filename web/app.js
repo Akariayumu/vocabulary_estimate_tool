@@ -75,7 +75,7 @@ function withVocabVersion(params = {}, version = state.vocabVersion) {
 }
 
 // ============================================================
-// Phase 1 – Quiz v2 (60 MC questions)
+// Phase 1 – Quiz v2（60 道选择题）
 // ============================================================
 
 async function startQuizV2() {
@@ -109,7 +109,7 @@ async function startQuizV2() {
 }
 
 // ============================================================
-// Stage 2 – Phase 2 refinement
+// Stage 2 – Phase 2 精细化
 // ============================================================
 
 async function startStage2() {
@@ -135,7 +135,7 @@ async function startStage2() {
       return;
     }
 
-    // Snapshot the current estimate before refinement
+    // 在精细化前快照当前估算
     state.preRefineResult = state.result ? { ...state.result } : null;
 
     const qCount = data.questions.length;
@@ -158,7 +158,7 @@ async function startStage2() {
 }
 
 // ============================================================
-// Render current question
+// 渲染当前问题
 // ============================================================
 
 function renderQuestion() {
@@ -297,7 +297,7 @@ function renderMCCard(question, isStage2) {
     unknownRow.appendChild(btn2);
   }
 
-  // Nav button visibility
+  // 导航按钮可见性
   const prevBtn = $("prevBtn");
   const nextBtn = $("nextBtn");
   const total = questions.length;
@@ -354,7 +354,7 @@ function renderBinaryCard(question, isStage2) {
   $("wordList").querySelector(".binaryKnown").addEventListener("click", () => answerBinary(true, isStage2));
   $("wordList").querySelector(".binaryUnknown").addEventListener("click", () => answerBinary(false, isStage2));
 
-  // Nav buttons
+  // 导航按钮
   const prevBtn = $("prevBtn");
   const nextBtn = $("nextBtn");
   const total = questions.length;
@@ -381,7 +381,7 @@ function renderBinaryCard(question, isStage2) {
 }
 
 // ============================================================
-// Answer handlers
+// 作答处理器
 // ============================================================
 
 function chooseOption(index, isStage2) {
@@ -455,7 +455,7 @@ function flashAndMaybeAdvance(word, choice, isStage2) {
 }
 
 // ============================================================
-// Navigation
+// 导航
 // ============================================================
 
 function goPrev() {
@@ -482,7 +482,7 @@ function goNext() {
 }
 
 // ============================================================
-// Summary page (shown after all quiz questions are answered)
+// 总结页（全部测验题答完后显示）
 // ============================================================
 
 function showSummary() {
@@ -532,7 +532,7 @@ function showSummary() {
 }
 
 // ============================================================
-// Submit estimate
+// 提交估算
 // ============================================================
 
 function buildResponseArray() {
@@ -636,7 +636,7 @@ function optionClass(index, selected, answer, isAnswered) {
 }
 
 // ============================================================
-// Save record
+// 保存记录
 // ============================================================
 
 async function saveRecord() {
@@ -667,7 +667,7 @@ async function saveRecord() {
 }
 
 // ============================================================
-// Article mode (unchanged)
+// 文章模式（未改动）
 // ============================================================
 
 let _articleRequestToken = 0;
@@ -737,7 +737,7 @@ async function estimateFromArticle() {
 }
 
 // ============================================================
-// Records
+// 记录
 // ============================================================
 
 async function loadRecords() {
@@ -771,7 +771,7 @@ function escapeHtml(value) {
 }
 
 // ============================================================
-// Event listeners
+// 事件监听器
 // ============================================================
 
 $("startBtn").addEventListener("click", () => startQuizV2().catch((err) => setMessage(err.message)));
@@ -811,7 +811,7 @@ document.addEventListener("keydown", (event) => {
   if (views.test.classList.contains("hidden")) return;
   const key = event.key;
 
-  // Navigation: Left/Right arrows
+  // 导航：左右箭头
   if (key === "ArrowLeft") {
     event.preventDefault();
     goPrev();
@@ -823,7 +823,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  // Answer selection: 1-6
+  // 答案选择：1-6
   if (!["1", "2", "3", "4", "5", "6"].includes(key)) return;
 
   const isStage2 = state.phase === "quiz_stage2";

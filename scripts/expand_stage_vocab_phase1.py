@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Phase 1 stage-vocabulary expansion for article estimation.
+"""用于文章估算的 Phase 1 阶段词库扩展。
 
-Generates:
+生成：
 - data/stage_vocab_enhanced.json
 - outputs/vocab_expansion_report.md
 
-The script is intentionally deterministic and uses only local word lists.
+此脚本有意保持确定性，并且只使用本地词表。
 """
 
 from __future__ import annotations

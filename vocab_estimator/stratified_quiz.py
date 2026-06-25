@@ -1,17 +1,17 @@
-"""Two-stage stratified vocabulary quiz using Rasch model.
+"""使用 Rasch model 的两阶段分层词汇测验。
 
-Uses ``stage_vocab.json`` (11950 words with difficulty / cluster_20 / cluster_100)
-and ``VocabBank`` (21738 words with wordfreq rank) to implement:
+使用 ``stage_vocab.json``（11950 个词，含 difficulty / cluster_20 / cluster_100）
+和 ``VocabBank``（21738 个词，含 wordfreq rank）实现：
 
-1. Phase 1 — configurable questions across 20 difficulty classes (default 30)
-2. Rasch MLE — fit user ability θ using scipy.optimize
-3. Phase 2 — refined questions for low-confidence classes (where user scored 1/2)
-4. Vocabulary estimate — sum P(known | θ) over all 21738 bank words
+1. Phase 1 — 在 20 个难度类别中抽取可配置数量的问题（默认 30）
+2. Rasch MLE — 使用 scipy.optimize 拟合用户能力 θ
+3. Phase 2 — 针对低置信类别（用户得分 1/2）追加精细问题
+4. 词汇量估算 — 对 21738 个词库词求和 P(known | θ)
 
-Key advantages over the existing bucket-based approach:
-- Smooth probability curve (no hard rank thresholds)
-- Self-consistent: easy-correct + hard-incorrect yields one θ
-- Stratified sampling: balanced coverage across difficulty clusters
+相比现有 bucket 方法的主要优势：
+- 平滑概率曲线（无硬 rank 阈值）
+- 自洽：简单词答对 + 难词答错会得到同一个 θ
+- 分层采样：在难度 cluster 上保持均衡覆盖
 """
 
 from __future__ import annotations
@@ -26,28 +26,28 @@ from typing import Any, Callable
 import numpy as np
 
 from .config import DEFAULT_CONFIG, EstimatorConfig
-# VocabBank no longer needed — we use stage_vocab.json directly
+# 不再需要 VocabBank，直接使用 stage_vocab.json
 
-# Type aliases
-Response = tuple[str, bool]  # (word, known)
-QuizItem = dict[str, Any]  # word, difficulty, cluster_20, cluster_100, source
+# 类型别名
+Response = tuple[str, bool]  # (word, known) 作答元组
+QuizItem = dict[str, Any]  # word、difficulty、cluster_20、cluster_100、source 字段
 
 STREAMING_CLUSTER_ORDER = [0, 19, 5, 15, 10, 2, 7, 12, 17, 4, 9, 14, 18, 1, 6, 11, 16, 3, 8, 13]
 MIDDLE_CLUSTER_ORDER = [c20 for c20 in STREAMING_CLUSTER_ORDER if 5 <= c20 <= 14]
 
-# ── Sigmoid (clamped for numerical stability) ─────────────────────────────────
+# ── Sigmoid（为数值稳定做 clamp）───────────────────────────────────────────────
 
 _SIGMOID = lambda x: 1.0 / (1.0 + np.exp(-np.clip(x, -40.0, 40.0)))
 
 
 def _logit(p: float) -> float:
-    """Logit transform, clamped to avoid infinities."""
+    """Logit 变换，并做 clamp 以避免无穷值。"""
     p = max(1e-10, min(1.0 - 1e-10, p))
     return math.log(p / (1.0 - p))
 
 
 def _sigmoid_scalar(x: float) -> float:
-    """Scalar sigmoid, clamped."""
+    """标量 sigmoid，并做 clamp。"""
     if x < -40:
         return 0.0
     if x > 40:
@@ -55,37 +55,37 @@ def _sigmoid_scalar(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
 
 
-# ── Project paths ─────────────────────────────────────────────────────────────
+# ── 项目路径 ─────────────────────────────────────────────────────────────────
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _STAGE_VOCAB_PATH = _PROJECT_ROOT / "data" / "stage_vocab.json"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Core class
+# 核心类
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class StratifiedQuiz:
-    """Two-stage stratified vocabulary quiz with Rasch-model fitting.
+    """带 Rasch model 拟合的两阶段分层词汇测验。
 
     Usage::
 
         sq = StratifiedQuiz(vocab_bank)
         phase1 = sq.phase1_sample()
-        # User answers → responses
+        # 用户作答 → responses
         theta, ci = sq.fit_ability(responses)  # Rasch MLE
         phase2 = sq.phase2_sample(theta, None)
-        # User answers more → all_responses
+        # 用户继续作答 → all_responses
         theta2, ci2 = sq.fit_ability(all_responses)
         estimate = sq.estimate_vocab(theta2)
     """
 
-    # ── Public API ────────────────────────────────────────────────────────
+    # ── 公共 API ──────────────────────────────────────────────────────────
 
     def __init__(
         self,
-        vocab_bank = None,  # deprecated, kept for API compatibility
+        vocab_bank = None,  # 已弃用，为 API 兼容性保留
         config: EstimatorConfig = DEFAULT_CONFIG,
         seed: int | None = None,
         stage_vocab_path: str | Path | None = None,
@@ -97,15 +97,15 @@ class StratifiedQuiz:
         self.phase1_question_count = int(phase1_question_count)
         effective_seed = seed if seed is not None else config.random_seed
         self.rng = random.Random() if effective_seed == 0 else random.Random(effective_seed)
-        self.bank = None  # no longer loads wordfreq
+        self.bank = None  # 不再加载 wordfreq
 
-        # Load stage_vocab
+        # 加载 stage_vocab
         sv_path = Path(stage_vocab_path or _STAGE_VOCAB_PATH)
         with open(sv_path, encoding="utf-8") as f:
             raw = json.load(f)
 
         self._word_to_stage: dict[str, dict] = raw["word_to_stage"]
-        # Only keep words that have difficulty, cluster_20, cluster_100
+        # 仅保留带有 difficulty、cluster_20、cluster_100 的词
         self._candidates: list[dict] = []
         for word, info in self._word_to_stage.items():
             diff = info.get("difficulty")
@@ -120,31 +120,31 @@ class StratifiedQuiz:
                     "source": "stage_vocab",
                 })
 
-        # Index candidates by cluster_20 and cluster_100
+        # 按 cluster_20 和 cluster_100 建立候选索引
         self._by_c20: dict[int, list[dict]] = {}
         self._by_c100: dict[int, list[dict]] = {}
         for c in self._candidates:
             self._by_c20.setdefault(c["cluster_20"], []).append(c)
             self._by_c100.setdefault(c["cluster_100"], []).append(c)
 
-        # Sorted difficulty for each cluster_20
+        # 每个 cluster_20 内按难度排序
         self._c20_sorted: dict[int, list[dict]] = {}
         for c20, items in self._by_c20.items():
             self._c20_sorted[c20] = sorted(items, key=lambda x: x["difficulty"])
 
-        # Precompute logit-difficulty for all bank words (including those not in stage_vocab)
+        # 为所有词库词预计算 logit difficulty（包括不在 stage_vocab 中的词）
         self._word_difficulties: dict[str, float] = self._build_word_difficulties()
 
     def phase1_sample(self, adaptive: bool = True, rng: random.Random | None = None) -> list[dict]:
-        """Generate Phase 1 questions in streaming-friendly order.
+        """按适合流式展示的顺序生成 Phase 1 问题。
 
-        The default 30-question path covers all 20 difficulty classes once,
-        then adds one extra item from the 10 middle classes. The 40-question
-        compatibility path keeps the previous 20 classes × 2 structure.
+        默认 30 题路径会先覆盖全部 20 个难度类别各一次，
+        再从 10 个中间类别各追加一题。40 题兼容路径保留原先的
+        20 类 × 2 结构。
 
         Args:
-            adaptive: If True, spread + per-class sampling; if False, balanced.
-            rng: Per-request random source (prevents concurrency bugs).
+            adaptive: True 时使用分散 + 按类别采样；False 时使用均衡采样。
+            rng: 每个请求独立的随机源（避免并发问题）。
         """
         _rng = rng or self.rng
         if not adaptive:
@@ -153,7 +153,7 @@ class StratifiedQuiz:
         return self._phase1_streaming(rng=_rng)
 
     def _phase1_streaming(self, rng: random.Random | None = None) -> list[dict]:
-        """Configurable Phase 1 sampler ordered for useful prefixes."""
+        """按可用前缀排序的可配置 Phase 1 采样器。"""
         _rng = rng or self.rng
         selected: list[dict] = []
         seen_words: set[str] = set()
@@ -185,10 +185,10 @@ class StratifiedQuiz:
         self,
         responses: list[Response],
     ) -> tuple[float, tuple[float, float]]:
-        """Fit Rasch ability θ from (word, known) responses via MLE.
+        """通过 MLE 从 (word, known) responses 拟合 Rasch 能力 θ。
 
         Returns:
-            (theta, (ci_low, ci_high)) where ci is the 95% confidence interval.
+            (theta, (ci_low, ci_high))，其中 ci 是 95% confidence interval。
         """
         prepared = self._prepare_responses(responses)
         if len(prepared) < 3:
@@ -197,16 +197,16 @@ class StratifiedQuiz:
         difficulties = np.array([d for _, d, _ in prepared], dtype=float)
         y = np.array([y for _, _, y in prepared], dtype=float)
 
-        # Logit-transform difficulties to match θ's scale
+        # 对 difficulty 做 logit 变换，使其匹配 θ 的尺度
         logit_d = np.array([_logit(max(0.001, min(0.999, d))) for d in difficulties], dtype=float)
 
-        # MLE via scipy
+        # 通过 scipy 做 MLE
         result = self._mle_theta(logit_d, y)
         theta = float(result["theta"])
 
-        # Fisher information
+        # Fisher information 信息量
         p = _SIGMOID(theta - logit_d)
-        fish = float(np.sum(p * (1.0 - p)))  # Fisher = Σ σ·(1-σ)
+        fish = float(np.sum(p * (1.0 - p)))  # Fisher 计算式 = Σ σ·(1-σ)
         se = 1.0 / math.sqrt(max(fish, 1e-10)) if fish > 0 else 5.0
 
         ci_low = theta - 1.96 * se
@@ -221,31 +221,29 @@ class StratifiedQuiz:
         n_per_class: int = 4,
         exclude: set[str] | None = None,
     ) -> list[dict]:
-        """Deprecated: generate Phase 2 refined questions for low-confidence classes.
+        """已弃用：为低置信类别生成 Phase 2 精细问题。
 
-        Experiments in ``scripts/explore_question_count.py`` showed Phase 2
-        adds negligible accuracy over Phase 1-only estimates. New production
-        flows keep this method for compatibility but do not call it by default.
+        ``scripts/explore_question_count.py`` 中的实验表明，相比仅用 Phase 1，
+        Phase 2 带来的精度提升可以忽略。新的生产流程保留此方法以兼容旧调用，
+        但默认不再调用。
 
-        For each class where the user scored exactly 1/2, add
-        ``n_per_class`` additional questions from the same
-        cluster_20 class. These extra questions are the most
-        informative (closest to current θ estimate).
+        对用户恰好得分 1/2 的每个类别，从同一个 cluster_20 类别中追加
+        ``n_per_class`` 个问题。这些追加问题信息量最大
+        （最接近当前 θ 估计）。
 
-        Phase 2 words will NOT overlap with those in ``exclude``
-        (typically Phase 1 words).
+        Phase 2 的词不会与 ``exclude`` 中的词重叠
+        （通常是 Phase 1 已出现的词）。
 
         Args:
-            theta: Current Rasch ability estimate.
-            low_confidence_classes: Optional list of cluster_20 values.
-                If None, computed from responses.
-            responses: Phase 1 responses (needed if
-                ``low_confidence_classes`` is None).
-            n_per_class: Number of extra questions per uncertain class.
-            exclude: Words to exclude (e.g. Phase 1 seen words).
+            theta: 当前 Rasch 能力估计。
+            low_confidence_classes: 可选的 cluster_20 值列表。
+                若为 None，则从 responses 计算。
+            responses: Phase 1 responses（当 ``low_confidence_classes`` 为 None 时需要）。
+            n_per_class: 每个不确定类别追加的问题数。
+            exclude: 需要排除的词（例如 Phase 1 已见词）。
 
         Returns:
-            List of quiz items for Phase 2.
+            Phase 2 的 quiz item 列表。
         """
         if low_confidence_classes is None:
             if responses is None:
@@ -257,7 +255,7 @@ class StratifiedQuiz:
 
         for c20 in low_confidence_classes:
             items = self._c20_sorted.get(c20, [])
-            # Score by information content at current θ
+            # 按当前 θ 下的信息量打分
             scored: list[tuple[float, dict]] = []
             for item in items:
                 if item["word"] in seen_words:
@@ -278,9 +276,9 @@ class StratifiedQuiz:
         self,
         theta: float,
     ) -> dict:
-        """Estimate total vocabulary size from Rasch θ.
+        """根据 Rasch θ 估算总词汇量。
 
-        Returns dict with point_estimate, contributions per word source, etc.
+        返回包含 point_estimate、各词源贡献等信息的 dict。
         """
         total = 0.0
         contributions: dict[str, float] = {}
@@ -301,13 +299,12 @@ class StratifiedQuiz:
         self,
         responses: list[Response],
     ) -> dict:
-        """Deprecated compatibility estimator: fit + vocab + CI.
+        """已弃用的兼容估算器：fit + vocab + CI。
 
-        This method remains for old API callers. The current default quiz flow
-        uses ``stream_estimate`` and does not run Phase 2, following the
-        question-count experiment that found Phase 1-only estimates sufficient.
+        此方法保留给旧 API 调用方。当前默认测验流程使用 ``stream_estimate``，
+        且不运行 Phase 2，因为题量实验发现仅用 Phase 1 已经足够。
 
-        Returns a dict compatible with the existing API format.
+        返回与现有 API 格式兼容的 dict。
         """
         theta, (ci_low, ci_high) = self.fit_ability(responses)
         vocab_raw = self._vocab_at_theta(theta)
@@ -318,7 +315,7 @@ class StratifiedQuiz:
         sample_size = len(prepared)
         ignored = len(responses) - sample_size
 
-        # Calibrate (same pipeline as existing VocabEstimator)
+        # 校准（与现有 VocabEstimator 使用同一流程）
         cal_raw = self._calibrate(vocab_raw)
         cal_low = self._calibrate(vocab_low)
         cal_high = self._calibrate(vocab_high)
@@ -347,11 +344,10 @@ class StratifiedQuiz:
         rng: random.Random | None = None,
         phase1_items: list[dict] | None = None,
     ) -> dict:
-        """Estimate from all answered responses and suggest the next items.
+        """基于全部已答 responses 估算，并建议下一批题目。
 
-        ``continue_available`` is based on the configured Phase 1 question
-        count. Suggested items follow the same streaming cluster order and
-        exclude already answered words.
+        ``continue_available`` 基于配置的 Phase 1 题量判断。
+        建议题目沿用相同的流式 cluster 顺序，并排除已答词。
         """
         theta, (ci_low, ci_high) = self.fit_ability(responses)
         se = (ci_high - ci_low) / (2.0 * 1.96)
@@ -397,7 +393,7 @@ class StratifiedQuiz:
         }
 
     def get_sampling_info(self) -> dict:
-        """Return metadata about the word pool structure."""
+        """返回词池结构的元数据。"""
         return {
             "phase1_question_count": self.phase1_question_count,
             "streaming_cluster_order": STREAMING_CLUSTER_ORDER,
@@ -410,12 +406,12 @@ class StratifiedQuiz:
             "cluster_100_count": len(self._by_c100),
         }
 
-    # ── Internal: Rasch fitting ──────────────────────────────────────────
+    # ── 内部：Rasch 拟合 ─────────────────────────────────────────────────
 
     def _mle_theta(self, d_logit: np.ndarray, y: np.ndarray) -> dict:
-        """MAP for θ with N(0,2) prior (no scipy dependency).
+        """带 N(0,2) prior 的 θ MAP 估计（不依赖 scipy）。
         
-        Prior prevents extreme θ for all-correct/all-wrong responses."""
+        prior 可避免全对/全错 responses 产生极端 θ。"""
         PRIOR_VAR = 2.0  # N(0, 2)
         p_obs = float(np.mean(y))
         theta0 = _logit(max(0.01, min(0.99, p_obs)))
@@ -428,9 +424,9 @@ class StratifiedQuiz:
             for _ in range(100):
                 logits = theta - d_logit
                 p = np.clip(_SIGMOID(logits), 1e-15, 1.0 - 1e-15)
-                # Gradient: Σ(σ - y) + θ/σ² (MAP prior)
+                # Gradient 公式：Σ(σ - y) + θ/σ²（MAP prior）
                 g = float(np.sum(p - y)) + theta / PRIOR_VAR
-                # Hessian: Σ(σ·(1-σ)) + 1/σ²
+                # Hessian 公式：Σ(σ·(1-σ)) + 1/σ²
                 h = float(np.sum(p * (1.0 - p))) + 1.0 / PRIOR_VAR
                 if abs(h) < 1e-12:
                     break
@@ -442,7 +438,7 @@ class StratifiedQuiz:
             final_logits = theta - d_logit
             final_p = np.clip(_SIGMOID(final_logits), 1e-15, 1.0 - 1e-15)
             nll = float(-np.sum(y * np.log(final_p) + (1.0 - y) * np.log(1.0 - final_p)))
-            nll += 0.5 * theta**2 / PRIOR_VAR  # log prior
+            nll += 0.5 * theta**2 / PRIOR_VAR  # log prior 项
 
             if nll < best_nll:
                 best_nll = nll
@@ -450,10 +446,10 @@ class StratifiedQuiz:
 
         return {"theta": best_theta, "nll": best_nll}
 
-    # ── Internal: helpers ────────────────────────────────────────────────
+    # ── 内部：辅助方法 ───────────────────────────────────────────────────
 
     def _phase1_balanced(self, rng: random.Random | None = None) -> list[dict]:
-        """Non-adaptive Phase 1 with the configured question count."""
+        """使用配置题量的非 adaptive Phase 1。"""
         _rng = rng or self.rng
         selected: list[dict] = []
         seen: set[str] = set()
@@ -465,7 +461,7 @@ class StratifiedQuiz:
         return selected[: self.phase1_question_count]
 
     def _phase1_class_counts(self) -> dict[int, int]:
-        """Return how many Phase 1 items to draw from each cluster_20."""
+        """返回每个 cluster_20 需要抽取的 Phase 1 题数。"""
         counts: dict[int, int] = {}
         first_wave = min(self.phase1_question_count, len(STREAMING_CLUSTER_ORDER))
         for c20 in STREAMING_CLUSTER_ORDER[:first_wave]:
@@ -477,11 +473,10 @@ class StratifiedQuiz:
         return counts
 
     def _phase1_topup_order(self) -> list[int]:
-        """Return the second-wave class order.
+        """返回第二轮类别顺序。
 
-        The first 10 top-up slots target the middle classes (5-14), which is
-        the 30-question optimum. Counts above 30 continue with the remaining
-        classes to preserve the old 40-question 20×2 path.
+        前 10 个补充名额指向中间类别（5-14），这是 30 题方案的最优选择。
+        超过 30 题后继续使用剩余类别，以保留旧的 40 题 20×2 路径。
         """
         if self.phase1_question_count >= 40:
             return list(STREAMING_CLUSTER_ORDER)
@@ -497,16 +492,16 @@ class StratifiedQuiz:
         strategy: str = "balanced",
         rng: random.Random | None = None,
     ) -> list[dict]:
-        """Pick n words from a cluster_20 class.
+        """从某个 cluster_20 类别中选择 n 个词。
 
         Args:
-            rng: Per-request random source (prevents concurrency bugs).
+            rng: 每个请求独立的随机源（避免并发问题）。
         """
         _rng = rng or self.rng
         items = self._c20_sorted.get(c20, [])
         available = [i for i in items if i["word"] not in exclude]
 
-        # Borrow from adjacent classes if pool is too small
+        # 若词池太小，则从相邻类别借词
         if len(available) < 10:
             for offset in [1, -1, 2, -2, 3, -3]:
                 neighbor = c20 + offset
@@ -526,12 +521,12 @@ class StratifiedQuiz:
         if not available:
             return []
 
-        # Shuffle before sorting so identical difficulties get randomized
+        # 排序前先 shuffle，让相同 difficulty 的词随机化
         _rng.shuffle(available)
         available_sorted = sorted(available, key=lambda x: x["difficulty"])
 
         if strategy == "extremes":
-            # Pick from extremes
+            # 从两端选择
             picks = []
             if len(available_sorted) >= 2:
                 picks = [available_sorted[0], available_sorted[-1]]
@@ -540,7 +535,7 @@ class StratifiedQuiz:
             return picks[:n]
 
         if strategy == "mid":
-            # Pick median difficulty words
+            # 选择中位难度附近的词
             if not available_sorted:
                 return []
             mid = len(available_sorted) // 2
@@ -548,11 +543,11 @@ class StratifiedQuiz:
             return picks
 
         if strategy == "balanced":
-            # Pick n words spread across the difficulty range, with randomness
+            # 在难度范围内分散选择 n 个词，并加入随机性
             m = len(available_sorted)
             if m <= n:
                 return available_sorted[:n]
-            # Divide into n segments and pick one random word from each
+            # 分成 n 段，并从每段随机选择一个词
             picked_indices = set()
             segment_size = m / n
             for i in range(n):
@@ -566,20 +561,20 @@ class StratifiedQuiz:
                     idx = seg_start
                 else:
                     idx = _rng.randint(seg_start, seg_end)
-                # Avoid duplicates if randomization lands on same index
+                # 如果随机落到同一索引，则避免重复
                 while idx in picked_indices and seg_end > seg_start:
                     idx = _rng.randint(seg_start, seg_end)
                 picked_indices.add(idx)
             return [available_sorted[i] for i in sorted(picked_indices)][:n]
 
         if strategy == "informative":
-            # Already sorted by information — just take top n
+            # 已按信息量排序，直接取前 n 个
             return available_sorted[:n]
 
         return available_sorted[:n]
 
     def _prepare_responses(self, responses: list[Response]) -> list[tuple[str, float, bool]]:
-        """Prepare (word, difficulty, known) tuples, filtering out unindexed words."""
+        """准备 (word, difficulty, known) 元组，并过滤未索引的词。"""
         result: list[tuple[str, float, bool]] = []
         for word, known in responses:
             w = word.strip().lower()
@@ -589,12 +584,12 @@ class StratifiedQuiz:
         return result
 
     def _identify_low_confidence(self, responses: list[Response]) -> list[int]:
-        """Identify cluster_20 classes where user got exactly 1/2 correct.
+        """识别用户恰好答对 1/2 的 cluster_20 类别。
 
-        With 2 questions per class:
-          - 0/2 = confident unknown
-          - 2/2 = confident known
-          - 1/2 = uncertain → needs refinement
+        每类 2 题时：
+          - 0/2 = 高置信未知
+          - 2/2 = 高置信已知
+          - 1/2 = 不确定 → 需要精细追问
         """
         from collections import defaultdict
 
@@ -615,58 +610,58 @@ class StratifiedQuiz:
         return sorted(low_conf)
 
     def _build_word_difficulties(self) -> dict[str, float]:
-        """Build difficulty for every word in the bank.
+        """为词库中每个词构建 difficulty。
 
-        For words in stage_vocab: use stored difficulty.
-        For bank-only words: estimate from wordfreq rank.
+        对 stage_vocab 中的词：使用已存 difficulty。
+        对仅在 bank 中的词：根据 wordfreq rank 估算。
         """
         difficulties: dict[str, float] = {}
 
-        # Prefer stage_vocab difficulties
+        # 优先使用 stage_vocab 中的 difficulty
         for c in self._candidates:
             difficulties[c["word"]] = c["difficulty"]
 
-        # All words covered by stage_vocab — no bank-only fallback needed
+        # 所有词都由 stage_vocab 覆盖，不需要 bank-only fallback
 
         return difficulties
 
     def _vocab_at_theta(self, theta: float) -> float:
-        """Compute sum of P(known | θ) over all bank words, then apply 0.8 calibration."""
+        """对所有词库词求和 P(known | θ)，再应用 0.8 校准。"""
         total = 0.0
         for word, difficulty in self._word_difficulties.items():
             d_logit = _logit(max(0.001, min(0.999, difficulty)))
             total += _sigmoid_scalar(theta - d_logit)
-        # Bug 1: empirical calibration — raw estimates are ~25% high
+        # Bug 1：经验校准，raw 估算约高 25%
         return total * 0.8
 
     @staticmethod
     def _item_information(theta: float, d_logit: float) -> float:
-        """Fisher information of one item at ability θ.
+        """能力 θ 下单个题目的 Fisher information。
 
         ``I_i(θ) = σ(θ - d_i)·(1 - σ(θ - d_i))``
-        This is maximised when θ = d_i (σ = 0.5 → I = 0.25).
+        当 θ = d_i 时达到最大值（σ = 0.5 → I = 0.25）。
         """
         p = _sigmoid_scalar(theta - d_logit)
         return p * (1.0 - p)
 
     def _calibrate(self, estimate: float) -> float:
-        """Apply the same tanh + piecewise calibration as VocabEstimator."""
+        """应用与 VocabEstimator 相同的 tanh + piecewise 校准。"""
         if estimate <= 0:
             return estimate
 
-        # Tanh saturation
+        # Tanh 饱和
         max_v = float(self.config.calibration_native_max)
         k = self.config.calibration_k
         cal = max_v * math.tanh(k * estimate)
 
-        # Piecewise calibration
+        # 分段校准
         if self.config.enable_piecewise_calibration:
             cal = self._piecewise_calibrate(cal)
 
         return float(cal)
 
     def _piecewise_calibrate(self, estimate: float) -> float:
-        """Piecewise linear calibration."""
+        """分段线性校准。"""
         if estimate <= 0:
             return estimate
         knots = self.config.piecewise_knots
@@ -680,7 +675,7 @@ class StratifiedQuiz:
         return float(prev_value + (estimate - prev_boundary) * knots[-1][1])
 
     def _map_level(self, estimate: float) -> str:
-        """Map a vocabulary-size estimate to a Chinese learner level."""
+        """将词汇量估算映射到中国学习者等级。"""
         thresholds = []
         for name, low, high in self.config.levels:
             thresholds.append((name, low, high))
@@ -704,7 +699,7 @@ class StratifiedQuiz:
         return thresholds[-1][0]
 
     def _confidence_label(self, point: float, ci_low: float, ci_high: float) -> str:
-        """Map CI width / estimate to 高, 中 or 低."""
+        """将 CI 宽度 / estimate 映射为高、中或低。"""
         if point <= 0:
             return "低"
         ratio = (ci_high - ci_low) / point

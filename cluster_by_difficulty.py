@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Cluster words by difficulty using equal-frequency binning.
-Ties are broken by word string (alphabetical) to distribute evenly.
+使用等频分箱按 difficulty 对词进行 cluster。
+相同 difficulty 时按单词字符串（字母序）打破平局，以便均匀分布。
 
-Two resolutions: 20 classes (coarse) and 100 classes (fine).
-Updates data/stage_vocab.json with cluster_20 and cluster_100 fields.
+两种粒度：20 类（粗粒度）和 100 类（细粒度）。
+会向 data/stage_vocab.json 写入 cluster_20 和 cluster_100 字段。
 """
 import json
 import numpy as np
@@ -13,7 +13,7 @@ from pathlib import Path
 
 DATA_PATH = Path("data/stage_vocab.json")
 
-# ── Load data ──────────────────────────────────────────────────────
+# ── 加载数据 ─────────────────────────────────────────────────────
 with open(DATA_PATH) as f:
     data = json.load(f)
 
@@ -26,14 +26,14 @@ print(f"Total words with difficulty: {n}")
 print(f"Difficulty range: [{difficulties.min():.4f}, {difficulties.max():.4f}]")
 print()
 
-# ── Equal-frequency binning with tie-breaking ─────────────────────
+# ── 带 tie-breaking 的等频分箱 ─────────────────────────────────
 def assign_bins(difficulties, words, n_bins):
     """
-    Assign bins based on (difficulty, word) sort order.
-    Each bin gets either floor(n/n_bins) or ceil(n/n_bins) words.
-    All bins are contiguous and IDs go 0..n_bins-1.
+    基于 (difficulty, word) 排序顺序分配 bins。
+    每个 bin 得到 floor(n/n_bins) 或 ceil(n/n_bins) 个词。
+    所有 bins 都连续，ID 范围为 0..n_bins-1。
     """
-    # Sort by (difficulty, word)
+    # 按 (difficulty, word) 排序
     pairs = list(enumerate(words))
     pairs.sort(key=lambda x: (difficulties[x[0]], x[1]))
     sorted_indices = [p[0] for p in pairs]
@@ -51,7 +51,7 @@ def assign_bins(difficulties, words, n_bins):
 labels_20 = assign_bins(difficulties, words, 20)
 labels_100 = assign_bins(difficulties, words, 100)
 
-# ── Write back to JSON ────────────────────────────────────────────
+# ── 写回 JSON ─────────────────────────────────────────────────
 for w, lbl20, lbl100 in zip(words, labels_20, labels_100):
     wts[w]["cluster_20"] = int(lbl20)
     wts[w]["cluster_100"] = int(lbl100)
@@ -62,7 +62,7 @@ with open(DATA_PATH, "w") as f:
 print("✅ Updated data/stage_vocab.json with cluster_20 and cluster_100")
 print()
 
-# ── Gather cluster data ───────────────────────────────────────────
+# ── 汇总 cluster 数据 ─────────────────────────────────────────
 clusters_20 = defaultdict(list)
 for w, lbl in zip(words, labels_20):
     clusters_20[lbl].append((w, wts[w]["difficulty"]))
@@ -71,7 +71,7 @@ clusters_100 = defaultdict(list)
 for w, lbl in zip(words, labels_100):
     clusters_100[lbl].append((w, wts[w]["difficulty"]))
 
-# ── Statistics: 20 clusters ───────────────────────────────────────
+# ── 统计：20 个 clusters ────────────────────────────────────
 print("=" * 80)
 print("📊 20-CLUSTER REPORT")
 print("=" * 80)
@@ -91,7 +91,7 @@ for cid in range(20):
 
 print()
 
-# ── Statistics: 100 clusters, grouped by 10 ───────────────────────
+# ── 统计：100 个 clusters，按 10 个一组 ─────────────────────
 print("=" * 80)
 print("📊 100-CLUSTER REPORT (grouped by 10)")
 print("=" * 80)
@@ -117,12 +117,12 @@ for group_start in range(0, 100, 10):
         print(d)
     print()
 
-# ── Verification ──────────────────────────────────────────────────
+# ── 验证 ───────────────────────────────────────────────────
 print("=" * 80)
 print("🔍 VERIFICATION")
 print("=" * 80)
 
-# 1. Easy words in low cluster
+# 1. 简单词位于低 cluster
 easy_words = ["hello", "apple", "book", "cat", "dog", "she", "he", "yes", "no", "big"]
 print("  Easy words (expected low cluster):")
 for w in easy_words:
@@ -133,7 +133,7 @@ for w in easy_words:
     else:
         print(f"    {w:12s} → NOT FOUND")
 
-# 2. Hard words in high cluster
+# 2. 难词位于高 cluster
 hard = ["conundrum", "ephemeral", "ubiquitous", "synecdoche", "zeitgeist",
         "idiosyncratic", "soliloquy", "sesquipedalian"]
 print("  Hard words (expected high cluster):")
@@ -145,7 +145,7 @@ for w in hard:
     else:
         print(f"    {w:16s} → NOT FOUND")
 
-# 3. Cross-boundary check: identical difficulties across adjacent bins
+# 3. 跨边界检查：相邻 bins 中相同 difficulties
 print("  Tie-distribution check (difficulty=0.9447 words):")
 d9447_words = [w for w in wts if abs(wts[w]["difficulty"] - 0.9447) < 1e-9]
 if d9447_words:
@@ -158,7 +158,7 @@ if d9447_words:
 
 print()
 
-# 4. Distribution balance
+# 4. 分布均衡
 sizes_20 = [len(clusters_20.get(i, [])) for i in range(20)]
 print(f"  20-cluster sizes: min={min(sizes_20)}, max={max(sizes_20)}, mean={np.mean(sizes_20):.1f}, "
       f"std={np.std(sizes_20):.1f}")

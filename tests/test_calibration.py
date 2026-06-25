@@ -1,4 +1,4 @@
-"""Validate the combined calibration (方案 A + 方案 B)."""
+"""验证组合校准（方案 A + 方案 B）。"""
 
 import sys
 import os
@@ -21,7 +21,7 @@ def make_responses(
     seed: int = 42,
     words_per_band: int = 30,
 ) -> list[Response]:
-    """Synthesize test responses with controlled knowledge rates."""
+    """使用受控已知率合成测试 responses。"""
 
     rng = random.Random(seed)
 
@@ -69,10 +69,10 @@ def main():
     print(f"Fallback mode: {bank.used_fallback}")
     print()
 
-    # All three scenarios use the SAME model instance for reproducibility
+    # 三个场景都使用同一个模型实例以便复现
     model = VocabEstimator(bank, config)
 
-    # ---- scenario 1: LOW ----
+    # ---- 场景 1：LOW ----
     print("=" * 65)
     print("SCENARIO 1 — LOW: 高频50%正确, 中频20%, 低频0%")
     r1, br1 = make_responses(bank, known_high=0.50, known_mid=0.20, known_low=0.00, words_per_band=25)
@@ -85,7 +85,7 @@ def main():
     print(f"  90% CI:            {e1['vocabulary_range']}")
     print()
 
-    # ---- scenario 2: MID ----
+    # ---- 场景 2：MID ----
     print("=" * 65)
     print("SCENARIO 2 — MID:  高频80%正确, 中频50%, 低频20%")
     r2, br2 = make_responses(bank, known_high=0.80, known_mid=0.50, known_low=0.20, words_per_band=30)
@@ -98,7 +98,7 @@ def main():
     print(f"  90% CI:            {e2['vocabulary_range']}")
     print()
 
-    # ---- scenario 3: HIGH ----
+    # ---- 场景 3：HIGH ----
     print("=" * 65)
     print("SCENARIO 3 — HIGH: 高频100%正确, 中频80%, 低频30%")
     r3, br3 = make_responses(bank, known_high=1.00, known_mid=0.80, known_low=0.30, words_per_band=30)
@@ -111,7 +111,7 @@ def main():
     print(f"  90% CI:            {e3['vocabulary_range']}")
     print()
 
-    # ---- cross-check: piecewise_calibrate isolated ----
+    # ---- 交叉检查：单独测试 piecewise_calibrate ----
     print("=" * 65)
     print("PIECEWISE CALIBRATION (isolated) — show compression curve")
     for raw_in in [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000,
@@ -119,7 +119,7 @@ def main():
         cal = model.piecewise_calibrate(float(raw_in))
         print(f"  raw {raw_in:>6} → piecewise {cal:>8.1f}")
 
-    # ---- weight function values ----
+    # ---- 权重函数取值 ----
     print()
     print("=" * 65)
     print("WEIGHT FUNCTION (isolated)")

@@ -70,7 +70,7 @@ def load_cet6_matched_words(
                 rank = lemma_to_rank.get(lemma, 30000)
             result.append((w, bucket, rank))
         else:
-            # Try lemma
+            # 尝试 lemma
             lemma = bank.lemmatizer.normalize(w)
             bucket = word_to_bucket.get(lemma)
             if bucket:
@@ -182,7 +182,7 @@ def predict_bucket_rates(theta: np.ndarray, gamma: float) -> np.ndarray:
 
 def estimate_raw_vocab(theta: np.ndarray, gamma: float,
                        bucket_sizes: np.ndarray) -> float:
-    """Σ bucket_size_b × P_b"""
+    """Σ bucket_size_b × P_b，用于计算 raw_vocab。"""
     rates = predict_bucket_rates(theta, gamma)
     return float(np.sum(bucket_sizes * rates))
 
@@ -962,7 +962,7 @@ def build_curriculum_sets(
             lemma = bank.lemmatizer.normalize(w)
             b = word_to_bucket.get(lemma)
             if b:
-                matched.add(w)  # store the original word form
+                matched.add(w)  # 存储原始 word form
         return matched
 
     # 加载考纲内置词集
@@ -976,7 +976,7 @@ def build_curriculum_sets(
     for name in set_names:
         raw = raw_sets[name]
         matched = _match_set(raw)
-        # This set is cumulative (includes all previous levels by construction)
+        # 该集合是累积的（按构造包含所有前序等级）
         cum_set = matched  # official_vocab 的列表本身就是累加的
         delta = cum_set - prev_set
         cum_size = len(cum_set)
@@ -1246,26 +1246,26 @@ def train_params_torch(
     for epoch in range(1, n_epochs + 1):
         optim.zero_grad()
 
-        # P_b = sigmoid(θ_b + γ_u)  →  shape (N, N_BUCKETS)
+        # P_b = sigmoid(θ_b + γ_u)  →  形状 (N, N_BUCKETS)
         logits = theta_t.unsqueeze(0) + gammas_t.unsqueeze(1)  # (N, NB)
         rates = torch.sigmoid(logits)
 
-        # MSE on rates with observation mask
+        # 使用 observation mask 计算 rates 上的 MSE
         err = rates - true_rates_mat
         loss = torch.sum(has_data_mat * err ** 2)
 
         # ── 考纲锚点损失 ──
         if official_sets:
             # 预测认知率: (N, N_SETS) = (N, N_BUCKETS) @ (N_BUCKETS, N_SETS)
-            pred_cov = rates @ bucket_weights_mat.T  # (N, N_SETS)
+            pred_cov = rates @ bucket_weights_mat.T  # 形状：(N, N_SETS)
 
             # 期望认知率: sigmoid((user_vocab - exam_vocab) / transition_width)
             exp_cov = torch.sigmoid(
                 (user_vocabs_t.unsqueeze(1) - exp_vocab_sizes.unsqueeze(0)) / transition_width
-            )  # (N, N_SETS)
+            )  # 形状：(N, N_SETS)
 
             # 加权锚点损失
-            anchor_err = pred_cov - exp_cov  # (N, N_SETS)
+            anchor_err = pred_cov - exp_cov  # 形状：(N, N_SETS)
             anchor_loss = torch.sum(set_weights_t.unsqueeze(0) * anchor_err ** 2)
             loss += anchor_weight * anchor_loss
 
@@ -1329,16 +1329,16 @@ def train_params_numpy(
     if official_sets:
         bucket_weights_mat = np.array([
             s['bucket_weights'] for s in official_sets
-        ], dtype=float)  # (N_SETS, N_BUCKETS)
+        ], dtype=float)  # 形状：(N_SETS, N_BUCKETS)
         exp_vocab_sizes = np.array([
             s['expected_vocab_size'] for s in official_sets
-        ], dtype=float)  # (N_SETS,)
+        ], dtype=float)  # 形状：(N_SETS,)
         set_weights = np.array([
             s['weight'] for s in official_sets
-        ], dtype=float)  # (N_SETS,)
+        ], dtype=float)  # 形状：(N_SETS,)
         user_vocabs = np.array([u['vocab_size'] for u in users], dtype=float)  # (N,)
 
-    # Adam state
+    # Adam 更新 更新 状态
     m_t, v_t = np.zeros(N_BUCKETS), np.zeros(N_BUCKETS)
     m_g, v_g = np.zeros(N), np.zeros(N)
     beta1, beta2, eps = 0.9, 0.999, 1e-8
@@ -1349,7 +1349,7 @@ def train_params_numpy(
     best_gammas = gammas.copy()
 
     for epoch in range(1, n_epochs + 1):
-        # Forward
+        # 前向计算
         logits = theta[np.newaxis, :] + gammas[:, np.newaxis]  # (N, NB)
         rates = sigmoid(logits)
         err = rates - true_mat
@@ -1362,7 +1362,7 @@ def train_params_numpy(
         anchor_loss_val = 0.0
         if official_sets:
             # 预测认知率: (N, N_SETS) = (N, N_BUCKETS) @ (N_BUCKETS, N_SETS)
-            pred_cov = rates @ bucket_weights_mat.T  # (N, N_SETS)
+            pred_cov = rates @ bucket_weights_mat.T  # 形状：(N, N_SETS)
 
             # 期望认知率: sigmoid((user_vocab - exam_vocab) / transition_width)
             exp_cov = sigmoid(
@@ -1374,27 +1374,27 @@ def train_params_numpy(
             anchor_loss_val = float(np.sum(set_weights[np.newaxis, :] * anchor_err ** 2))
             loss_val += anchor_weight * anchor_loss_val
 
-        # Gradient of MSE + L2
+        # MSE + L2 的 gradient
         d_sig = rates * (1.0 - rates)
         weighted = has_data * err * d_sig  # (N, NB)
 
         grad_theta = 2.0 * np.sum(weighted, axis=0) + 2.0 * l2_theta * theta
         grad_gamma = 2.0 * np.sum(weighted, axis=1) + 2.0 * l2_gamma * gammas
 
-        # Gradient of anchor loss
+        # anchor loss 的 gradient
         if official_sets and anchor_weight > 0:
-            # pred_cov = rates @ W.T, d_pred/d_rates = W.T
-            # d_anchor/d_rates = 2 * set_weights * (pred_cov - exp_cov) * W  (broadcast)
-            # rates = sigmoid(t + g), so d_rates/d_logits = d_sig
+        # pred_cov 公式 = rates @ W.T，d_pred/d_rates = W.T
+        # d_anchor/d_rates 公式 = 2 * set_weights * (pred_cov - exp_cov) * W（broadcast）
+            # rates = sigmoid(t + g)，因此 d_rates/d_logits = d_sig
             anchor_grad_logits = 2.0 * (
                 (set_weights[np.newaxis, :] * anchor_err) @ bucket_weights_mat
             )  # (N, NB)
-            anchor_grad_logits *= d_sig  # chain rule through sigmoid
+            anchor_grad_logits *= d_sig  # 通过 sigmoid 应用 chain rule
 
             grad_theta += anchor_weight * np.sum(anchor_grad_logits, axis=0)
             grad_gamma += anchor_weight * np.sum(anchor_grad_logits, axis=1)
 
-        # Adam
+        # Adam 更新 更新
         t += 1
         m_t = beta1 * m_t + (1 - beta1) * grad_theta
         v_t = beta2 * v_t + (1 - beta2) * grad_theta ** 2
@@ -1443,7 +1443,7 @@ def train_calibration_params(
     对于桶矩阵模型，raw_vocab 已经是词汇量的直接估计，
     所以校准使用恒等映射 (k=0 跳过 tanh, ks=[1,1,1])。
     """
-    # Identity: skip tanh (k=0), piecewise slopes = 1.0
+    # 恒等映射：跳过 tanh（k=0），piecewise slopes = 1.0
     k = 0.0
     ks = np.array([1.0, 1.0, 1.0], dtype=float)
 
@@ -1457,7 +1457,7 @@ def train_calibration_params(
     best_k, best_ks = k, ks.copy()
 
     for epoch in range(1, n_epochs + 1):
-        # Loss at current point
+        # 当前点的 loss
         total = 0.0
         for ui, user in enumerate(users):
             raw_v = estimate_raw_vocab(theta, gammas[ui], bucket_sizes)
@@ -1485,7 +1485,7 @@ def train_calibration_params(
                 lm_i += (calibrate(raw_v, k, ksm) - user['vocab_size']) ** 2
             grad_ks[i] = (lp_i - lm_i) / (2.0 * eps_fd * len(users))
 
-        # Clamp gradients for stability
+        # 为稳定性 clamp gradients
         grad_k = np.clip(grad_k, -1e-3, 1e-3)
         grad_ks = np.clip(grad_ks, -1.0, 1.0)
 
@@ -1754,7 +1754,7 @@ def main() -> None:
         print("GEN MODE: two_phase — freq fill base + CET-6 1/√rank weighted")
         print(f"{'='*60}")
         print(f"  two_phase_fill={args.two_phase_fill}, two_phase_samples={args.two_phase_samples}")
-        # Precompute bucket_words
+        # 预计算 bucket_words
         bucket_words: dict[str, list[str]] = {}
         for label in BUCKET_LABELS:
             bucket_words[label] = [
@@ -1768,8 +1768,8 @@ def main() -> None:
             seed=args.seed,
             n_questions_total=args.n_questions,
         )
-        # For two_phase mode, the users already include both groups A and B
-        # We don't add freq_users separately since group B covers that
+        # 在 two_phase 模式下，users 已包含 A/B 两组
+        # 由于组 B 已覆盖，不再单独添加 freq_users
         main_users = []
         freq_users = tp_users
         n_tp = len(tp_users)
@@ -1872,7 +1872,7 @@ def main() -> None:
         print()
         for ui, user in enumerate(users):
             logits = theta[np.newaxis, :] + gammas[ui]
-            rates = sigmoid(logits)  # (N_BUCKETS,)
+            rates = sigmoid(logits)  # 形状：(N_BUCKETS,)
             print(f"  {user['vocab_size']:>8d}  ", end="")
             for s in official_sets:
                 pred = float(np.sum(s['bucket_weights'] * rates))

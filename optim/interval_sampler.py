@@ -1,21 +1,19 @@
-"""Interval-based word sampler for calibration test sets.
+"""用于校准测试集的 interval-based 词汇采样器。
 
-Samples words from the vocab_bank at regular rank intervals,
-with a configurable number of words per interval group.
+按固定 rank interval 从 vocab_bank 中采样词，每个 interval group 的采样数可配置。
 
-Key design:
-  - Divide the 30k rank range into equal-width intervals
-    (interval=50 → 600 groups, interval=100 → 300 groups)
-  - Randomly sample `per_group` words from each interval
-  - Total test words ≈ 30000/interval × per_group
+核心设计：
+  - 将 30k rank 范围划分为等宽 intervals
+    (interval=50 → 600 groups，interval=100 → 300 groups)
+  - 从每个 interval 随机采样 `per_group` 个词
+  - 总测试词数约为 30000/interval × per_group
 
-Usage:
+用法：
     from optim.interval_sampler import sample_words, describe_sampling
 
     bank = VocabBank()
     words = sample_words(bank, interval=50, per_group=2)
-    print(describe_sampling(words, bank))
-"""
+    print(describe_sampling(words, bank))"""
 
 from __future__ import annotations
 
@@ -34,7 +32,7 @@ from vocab_estimator.vocab_bank import VocabBank, VocabItem
 
 @dataclass
 class SampledWord:
-    """One sampled word with its interval metadata."""
+    """带 interval 元数据的一个采样词。"""
 
     word: str
     rank: int
@@ -45,7 +43,7 @@ class SampledWord:
 
 @dataclass
 class SamplingReport:
-    """Summary of an interval sampling run."""
+    """一次 interval sampling 运行的 summary。"""
 
     total_sampled: int
     interval: int
@@ -63,26 +61,25 @@ def sample_words(
     per_group: int = 2,
     seed: int | None = None,
 ) -> list[SampledWord]:
-    """Sample words from vocab_bank at regular rank intervals.
+    """按固定 rank interval 从 vocab_bank 采样词。
 
     Args:
-        vocab_bank: The vocabulary bank to sample from.
-        interval: Rank interval width (default 50).
-        per_group: Number of words to sample per interval (default 2).
-        seed: Random seed for reproducibility.
+        vocab_bank: 要采样的词库。
+        interval: Rank interval 宽度（默认 50）。
+        per_group: 每个 interval 的采样词数（默认 2）。
+        seed: 用于复现的随机种子。
 
     Returns:
-        List of ``SampledWord`` with metadata.
-    """
+        带元数据的 ``SampledWord`` 列表。"""
     rng = random.Random(seed)
 
-    # Build a rank-indexed lookup: for each rank, list of words at that rank
-    # VocabBank's items have rank populated. Multiple lemmas may share the same rank.
+    # 构建按 rank 索引的查表：每个 rank 对应该 rank 的词列表
+    # VocabBank items 已填充 rank；多个 lemmas 可能共享同一 rank。
     rank_to_items: dict[int, list[VocabItem]] = {}
     for item in vocab_bank.items:
         rank_to_items.setdefault(item.rank, []).append(item)
 
-    # Total rank range: 1 to vocab_size (30000)
+    # 总 rank 范围：1 到 vocab_size（30000）
     max_rank = vocab_bank.config.vocab_size  # 30000
     sampled: list[SampledWord] = []
     intervals_with_few_words: list[tuple[int, int, int]] = []
@@ -90,14 +87,14 @@ def sample_words(
     for start_rank in range(1, max_rank + 1, interval):
         end_rank = min(start_rank + interval - 1, max_rank)
 
-        # Collect all items whose rank falls within [start_rank, end_rank]
+        # 收集 rank 落在 [start_rank, end_rank] 内的所有 items
         group_items: list[VocabItem] = []
         for r in range(start_rank, end_rank + 1):
             group_items.extend(rank_to_items.get(r, []))
 
         if len(group_items) < per_group:
             intervals_with_few_words.append((start_rank, end_rank, len(group_items)))
-            # Sample what's available
+            # 对可用项进行采样
             sampled_group = list(group_items) if not group_items else (
                 group_items if len(group_items) <= per_group
                 else rng.sample(group_items, per_group)
@@ -122,10 +119,9 @@ def get_words_in_rank_range(
     start_rank: int,
     end_rank: int,
 ) -> list[str]:
-    """Get all words whose rank falls in [start_rank, end_rank].
+    """获取 rank 落在 [start_rank, end_rank] 中的所有词。
 
-    Added as a convenience for the ``interval_sampler`` module.
-    """
+    作为 ``interval_sampler`` 模块的便利方法添加。"""
     items = []
     for item in vocab_bank.items:
         if start_rank <= item.rank <= end_rank:
@@ -133,10 +129,10 @@ def get_words_in_rank_range(
     return items
 
 
-# ── Also expose as bound method on VocabBank via monkey-patch ──
+# ── 同时通过 monkey-patch 暴露为 VocabBank 绑定方法 ──
 
 def _patch_vocab_bank_method() -> None:
-    """Add ``get_words_in_rank_range`` to ``VocabBank`` if not present."""
+    """若 ``VocabBank`` 尚无 ``get_words_in_rank_range``，则添加该方法。"""
     if not hasattr(VocabBank, "get_words_in_rank_range"):
         def get_words_in_rank_range_method(self, start_rank, end_rank):
             return get_words_in_rank_range(self, start_rank, end_rank)
@@ -146,29 +142,29 @@ def _patch_vocab_bank_method() -> None:
 _patch_vocab_bank_method()
 
 
-# ── Reporting ──
+# ── 报告 ──
 
 def describe_sampling(
     sampled: list[SampledWord],
     vocab_bank: VocabBank | None = None,
 ) -> str:
-    """Return a human-readable report of the sampling results."""
+    """返回采样结果的易读报告。"""
     lines = []
     lines.append(f"Total sampled: {len(sampled)} words")
     if not sampled:
         return "\n".join(lines)
 
-    # Group by interval
+    # 按 interval 分组
     intervals: dict[int, list[SampledWord]] = {}
     for sw in sampled:
         intervals.setdefault(sw.interval_start, []).append(sw)
 
-    # Ranks
+    # Ranks 列
     ranks = [sw.rank for sw in sampled]
     lines.append(f"Rank range:     {min(ranks)} – {max(ranks)}")
     lines.append(f"Intervals used: {len(intervals)}")
 
-    # Bucket distribution
+    # Bucket 分布
     bucket_counts: dict[str, int] = {}
     for sw in sampled:
         bucket_counts[sw.bucket] = bucket_counts.get(sw.bucket, 0) + 1
@@ -183,7 +179,7 @@ def describe_sampling(
         else:
             lines.append(f"  {bucket:>5s}: {count:4d} ({pct:5.1f}%)")
 
-    # Sample words (first 20)
+    # 示例词（前 20 个）
     lines.append(f"\nSample words (first {min(20, len(sampled))}):")
     for sw in sorted(sampled[:20], key=lambda x: x.rank):
         lines.append(f"  rank {sw.rank:>5d} [{sw.interval_start:>5d}-{sw.interval_end:>5d}] {sw.word}")
@@ -195,15 +191,14 @@ def compute_interval_known_rates(
     sampled: list[SampledWord],
     known_words: set[str],
 ) -> dict[tuple[int, int], float]:
-    """Compute observed known-rate per interval group.
+    """计算每个 interval group 的观测 known-rate。
 
     Args:
-        sampled: Sampled words with interval metadata.
-        known_words: Set of words the learner knows.
+        sampled: 带 interval 元数据的采样词。
+        known_words: 学习者已知词集合。
 
     Returns:
-        {(start_rank, end_rank): known_rate, ...}
-    """
+        {(start_rank, end_rank): known_rate, ...}"""
     groups: dict[tuple[int, int], list[bool]] = {}
     for sw in sampled:
         key = (sw.interval_start, sw.interval_end)
@@ -213,7 +208,7 @@ def compute_interval_known_rates(
 
 
 def _bucket_sort_key(bucket: str) -> tuple[int, int]:
-    """Sort buckets by numeric boundary value."""
+    """按数值边界对 buckets 排序。"""
     try:
         if bucket.endswith("k"):
             return (0, int(bucket[:-1]) * 1000)
@@ -222,10 +217,10 @@ def _bucket_sort_key(bucket: str) -> tuple[int, int]:
         return (2, 0)
 
 
-# ── Exam-level-aware (smart) sampling ──
+# ── 考试等级感知（smart）sampling ──
 
-# Exam levels with their expected vocabulary size (word families).
-# These define where the "transition zone" (p≈0.5) falls for each level.
+# 考试等级及其期望词汇量（word families）。
+# 它们定义每个等级的 “transition zone”（p≈0.5）所在位置。
 EXAM_LEVELS: list[tuple[str, int]] = [
     ("中考", 2000),
     ("高考", 3500),
@@ -237,19 +232,18 @@ EXAM_LEVELS: list[tuple[str, int]] = [
 
 
 def _sigmoid_known_rate(rank: float, vocab_size: int, alpha: float = 4.0) -> float:
-    """Return expected p(known) for a learner with given vocab_size at a given rank.
+    """返回给定 vocab_size 的学习者在某个 rank 上的期望 p(known)。
 
-    Uses a sigmoid centered at rank = vocab_size:
+    使用以 rank = vocab_size 为中心的 sigmoid：
         p(known) = 1 / (1 + exp(alpha * (rank - vocab_size) / vocab_size))
 
-    When rank == vocab_size: p = 0.5 (maximum uncertainty).
-    When rank << vocab_size: p → 1.0 (almost certainly knows).
-    When rank >> vocab_size: p → 0.0 (almost certainly doesn't).
-    """
+    当 rank == vocab_size 时：p = 0.5（最大不确定性）。
+    当 rank << vocab_size 时：p → 1.0（几乎肯定认识）。
+    当 rank >> vocab_size 时：p → 0.0（几乎肯定不认识）。"""
     if vocab_size <= 0:
         return 0.0
     z = alpha * (rank - vocab_size) / vocab_size
-    # Clamp to avoid overflow
+    # Clamp 以避免 overflow
     if z > 40:
         return 0.0
     if z < -40:
@@ -263,13 +257,12 @@ def _bucket_info(
     alpha: float = 4.0,
     info_exponent: float = 1.5,
 ) -> float:
-    """Compute the information weight for a single bucket.
+    """计算单个 bucket 的 information weight。
 
     weight = size × (Σ p(1-p))^info_exponent
 
-    Higher info_exponent (>1) amplifies differences between informative
-    and uninformative buckets, reducing samples from the tails.
-    """
+    较高的 info_exponent（>1）会放大有信息量 bucket 与低信息量 bucket 的差异，
+    减少尾部采样。"""
     total_info = 0.0
     for _name, vocab_size in EXAM_LEVELS:
         p = _sigmoid_known_rate(bucket_mid_rank, vocab_size, alpha)
@@ -285,11 +278,10 @@ def describe_smart_allocation(
     alpha: float = 4.0,
     info_exponent: float = 1.5,
 ) -> str:
-    """Return a report of the smart sampling allocation per bucket.
+    """返回 smart sampling 每个 bucket 分配量的报告。
 
-    Shows the expected information per bucket, the computed weights,
-    and how many words would be sampled from each bucket.
-    """
+    展示每个 bucket 的期望 information、计算出的 weights，
+    以及每个 bucket 会采样多少词。"""
     boundaries = vocab_bank.config.bucket_boundaries
     lines = []
     lines.append(f"Smart sampling allocation (exam-level-aware)")
@@ -301,7 +293,7 @@ def describe_smart_allocation(
         lines.append(f"    {lname}: ~{vsize} vocab")
     lines.append("")
 
-    # ── Per-bucket computations ──
+    # ── 每个 bucket 的计算 ──
     bucket_data: list[dict[str, Any]] = []
     prev_boundary = 0
     for boundary in boundaries:
@@ -312,7 +304,7 @@ def describe_smart_allocation(
         items = vocab_bank.words_by_bucket.get(label, [])
         size = len(items)
 
-        # Per-level information
+        # 每个等级的 information
         per_level_p: list[float] = []
         per_level_info: list[float] = []
         for _lname, vsize in EXAM_LEVELS:
@@ -340,7 +332,7 @@ def describe_smart_allocation(
     if total_weight <= 0:
         return "No non-zero weights computed."
 
-    # ── Per-level p table ──
+    # ── 每个等级的 p 表 ──
     header_levels = " | ".join(f"{ln:>6s}" for ln, _ in EXAM_LEVELS)
     lines.append(f" {'Bucket':>6s}  {'Mid':>6s}  {header_levels}  {'Σ_info':>8s}")
     lines.append(f" {'-'*6:>6s}  {'-'*6:>6s}  {'-'*len(header_levels):>{len(header_levels)}s}  {'-'*8:>8s}")
@@ -349,7 +341,7 @@ def describe_smart_allocation(
         lines.append(f" {bd['label']:>6s}  {bd['mid']:>6.0f}  {p_strs}  {bd['total_info']:>8.4f}")
     lines.append("")
 
-    # ── Allocation table ──
+    # ── Allocation 表 ──
     header = f"  {'Bucket':>6s}  {'Size':>6s}  {'Weight':>10s}  {'Weight×':>8s}  {'Samples':>7s}  {'%':>6s}  Note"
     sep = f"  {'------':>6s}  {'------':>6s}  {'----------':>10s}  {'--------':>8s}  {'-------':>7s}  {'------':>6s}  ----"
     lines.append(header)
@@ -363,15 +355,15 @@ def describe_smart_allocation(
         allocations[bd["label"]] = alloc
         allocated += alloc
 
-    # Rounding adjustment
+    # 舍入调整
     diff = total_samples - allocated
     if diff != 0 and bucket_data:
-        # Adjust bucket with highest per-word information
+        # 调整每词 information 最高的 bucket
         adjust = max(bucket_data, key=lambda b: b["total_info"])
         allocations[adjust["label"]] = max(1, allocations[adjust["label"]] + diff)
         allocated += diff
 
-    # Compute relative weights (normalized to the minimum raw-weight bucket)
+    # 计算相对 weights（归一化到最小 raw-weight bucket）
     min_weight = min(bd["weight"] for bd in bucket_data) if bucket_data else 1.0
 
     for bd in bucket_data:
@@ -380,17 +372,17 @@ def describe_smart_allocation(
         pct = 100.0 * alloc / total_samples
         rel_weight = bd["weight"] / max(min_weight, 0.001)
 
-        # Determine note text: which exam levels have their transition here
-        # A bucket is a "boundary" for a level if 0.1 < p < 0.9
+        # 确定 note 文本：哪些考试等级的 transition 位于此处
+        # 若 0.1 < p < 0.9，则该 bucket 是某等级的 “boundary”
         boundary_for: list[str] = []
         for idx, (_lname, vsize) in enumerate(EXAM_LEVELS):
             p = bd["per_level_p"][idx]
             if 0.1 < p < 0.9:
                 boundary_for.append(_lname)
 
-        # Normalise total_info to [0, 1] relative to max possible (6 × 0.25 = 1.5)
+        # 将 total_info 按最大可能值（6 × 0.25 = 1.5）归一化到 [0, 1]
         norm_info = bd["total_info"] / 1.5
-        
+
         notes = []
         if norm_info >= 0.30:
             notes.append("★高区分度")
@@ -428,30 +420,26 @@ def smart_sample_words(
     info_exponent: float = 1.5,
     seed: int | None = None,
 ) -> list[SampledWord]:
-    """Sample words from ``vocab_bank`` using exam-level-aware smart weighting.
+    """使用考试等级感知的 smart weighting 从 ``vocab_bank`` 采样词。
 
-    The sampling density is highest for buckets that lie at the boundaries
-    of multiple exam levels (where p(known) ≈ 0.5 for the most learners),
-    and lowest for very common buckets (everyone knows) and very rare
-    buckets (no one knows).
+    位于多个考试等级边界的 buckets 采样密度最高
+    （对最多学习者而言 p(known) ≈ 0.5），而非常常见 bucket（人人都会）和
+    非常罕见 bucket（几乎没人会）采样密度最低。
 
     Args:
-        vocab_bank: The vocabulary bank to sample from.
-        total_samples: Total number of words to sample (default 3000).
-        alpha: Sigmoid steepness parameter (default 4.0). Higher values
-               make the transition between "known" and "unknown" sharper.
-        info_exponent: Exponent applied to the per-word information before
-                       multiplying by bucket size (default 1.5). Higher values
-                       concentrate samples more on high-information buckets.
-        seed: Random seed for reproducibility.
+        vocab_bank: 要采样的词库。
+        total_samples: 总采样词数（默认 3000）。
+        alpha: Sigmoid 陡峭度参数（默认 4.0）。值越高，known/unknown 转换越陡。
+        info_exponent: 先作用在每词 information 上，再乘以 bucket size 的指数（默认 1.5）。
+            值越高，采样越集中到高信息量 buckets。
+        seed: 用于复现的随机种子。
 
     Returns:
-        List of ``SampledWord`` with metadata, sorted by rank.
-    """
+        按 rank 排序、带元数据的 ``SampledWord`` 列表。"""
     rng = random.Random(seed)
     boundaries = vocab_bank.config.bucket_boundaries
 
-    # ── Compute per-bucket info and weight ──
+    # ── 计算每个 bucket 的 info 和 weight ──
     bucket_stats: dict[str, dict[str, Any]] = {}
     prev_boundary = 0
     for boundary in boundaries:
@@ -484,7 +472,7 @@ def smart_sample_words(
     if total_weight <= 0:
         return []
 
-    # ── Compute allocations ──
+    # ── 计算 allocations ──
     allocations: dict[str, int] = {}
     allocated = 0
     for label, bs in bucket_stats.items():
@@ -493,7 +481,7 @@ def smart_sample_words(
         allocations[label] = alloc
         allocated += alloc
 
-    # Rounding adjustment: adjust the most informative bucket
+    # 舍入调整: adjust the most informative bucket
     diff = total_samples - allocated
     if diff != 0 and bucket_stats:
         most_info = max(
@@ -502,7 +490,7 @@ def smart_sample_words(
         )
         allocations[most_info] = max(1, allocations[most_info] + diff)
 
-    # ── Sample within each bucket ──
+    # ── 在每个 bucket 内采样 ──
     sampled: list[SampledWord] = []
     for label, bs in bucket_stats.items():
         n = allocations[label]
@@ -529,20 +517,19 @@ def smart_sample_words(
     return sampled
 
 
-# ── Weighted (power-law) sampling ──
+    # ── 加权（power-law）sampling ──
 
 
 def _bucket_rank_range(
     label: str,
     boundaries: tuple[int, ...],
 ) -> tuple[int, int]:
-    """Return (start_rank, end_rank) for a bucket label.
+    """返回 bucket 标签对应的 (start_rank, end_rank)。
 
-    Examples:
+    示例：
         "1k"  → (1, 1000)
         "2k"  → (1001, 2000)
-        "30k" → (20001, 30000)
-    """
+        "30k" → (20001, 30000)"""
     end_rank = int(label.rstrip("k")) * 1000
     prev = 0
     for b in boundaries:
@@ -558,32 +545,29 @@ def weighted_sample_words(
     power: float = 0.7,
     seed: int | None = None,
 ) -> list[SampledWord]:
-    """Sample words from ``vocab_bank`` using power-law weighted per-bucket sampling.
+    """使用 power-law weighted per-bucket sampling 从 ``vocab_bank`` 采样词。
 
-    High-frequency buckets (low rank) get proportionally more samples because
-    they carry more information about overall vocabulary comprehension. The
-    allocation per bucket follows:
+    高频 buckets（低 rank）按比例得到更多样本，因为它们对整体词汇理解更有信息量。
+    每个 bucket 的分配遵循：
 
         weight_b = size_b * (1 / median_rank_b) ** power
 
-    where ``power`` controls the skew toward high-frequency words.
-    ``power=0`` → uniform across buckets (proportional to bucket size).
-    ``power=1.0`` → strong high-frequency bias.
+    其中 ``power`` 控制向高频词倾斜的程度。
+    ``power=0`` → buckets 间均匀（与 bucket size 成比例）。
+    ``power=1.0`` → 强高频偏置。
 
     Args:
-        vocab_bank: The vocabulary bank to sample from.
-        total_samples: Total number of words to sample (default 3000).
-        power: Power-law exponent for rank-based weighting (default 0.7).
-               Higher values skew samples more toward high-frequency words.
-        seed: Random seed for reproducibility.
+        vocab_bank: 要采样的词库。
+        total_samples: 总采样词数（默认 3000）。
+        power: 基于 rank 加权的 power-law 指数（默认 0.7）。值越高越偏向高频词。
+        seed: 用于复现的随机种子。
 
     Returns:
-        List of ``SampledWord`` with metadata.
-    """
+        带元数据的 ``SampledWord`` 列表。"""
     rng = random.Random(seed)
     sampled: list[SampledWord] = []
 
-    # Compute per-bucket stats and weights
+    # 计算每个 bucket 的 stats 和 weights
     bucket_stats: dict[str, dict[str, Any]] = {}
     for label, items in vocab_bank.words_by_bucket.items():
         n = len(items)
@@ -604,7 +588,7 @@ def weighted_sample_words(
     if total_weight <= 0:
         return sampled
 
-    # Compute allocation per bucket
+    # 计算每个 bucket 的 allocation
     allocations: dict[str, int] = {}
     allocated = 0
     for label, bs in bucket_stats.items():
@@ -613,7 +597,7 @@ def weighted_sample_words(
         allocations[label] = alloc
         allocated += alloc
 
-    # Adjust for rounding: add/subtract difference from the largest bucket
+    # 舍入调整：在最大 bucket 上加/减差值
     diff = total_samples - allocated
     if diff != 0 and bucket_stats:
         biggest = max(bucket_stats, key=lambda l: bucket_stats[l]["size"])
@@ -621,7 +605,7 @@ def weighted_sample_words(
 
     boundaries = vocab_bank.config.bucket_boundaries
 
-    # Sample within each bucket
+    # 在每个 bucket 内采样
     for label, bs in bucket_stats.items():
         n = allocations[label]
         items = bs["items"]
@@ -650,11 +634,9 @@ def describe_weighted_allocation(
     total_samples: int = 3000,
     power: float = 0.7,
 ) -> str:
-    """Return a report of the weighted sampling allocation per bucket.
+    """返回 weighted sampling 每个 bucket 分配量的报告。
 
-    Non-destructive: does not perform the actual sampling, only shows
-    how many words would be drawn from each bucket.
-    """
+    非破坏性：不执行实际采样，只展示每个 bucket 会抽取多少词。"""
     lines = []
     lines.append(f"Weighted sampling allocation (power={power}, total_samples={total_samples}):")
     lines.append("")
@@ -697,7 +679,7 @@ def describe_weighted_allocation(
     return "\n".join(lines)
 
 
-# ── CLI ──
+# ── CLI 入口 ──
 
 def main() -> None:
     import argparse
@@ -743,7 +725,7 @@ def main() -> None:
             report = describe_sampling(sampled, bank)
     else:
         if args.describe:
-            # For uniform interval sampling, show predicted counts
+            # 对 uniform interval sampling，显示预测 counts
             n_intervals = (bank.config.vocab_size + args.interval - 1) // args.interval
             total_est = n_intervals * args.per_group
             report = (
@@ -758,7 +740,7 @@ def main() -> None:
     print(report)
 
 
-# ── Synthetic test-question sampling (high-frequency weighted) ──
+# ── 合成测试题采样（high-frequency weighted）──
 
 
 def sample_test_questions(
@@ -767,29 +749,26 @@ def sample_test_questions(
     power: float = 0.5,
     seed: int | None = None,
 ) -> list[SampledWord]:
-    """Sample test questions from ``vocab_bank`` using frequency-weighted distribution.
+    """使用 frequency-weighted distribution 从 ``vocab_bank`` 抽取测试题。
 
-    High-frequency (low-rank) words have higher probability of appearing in test
-    questions, simulating real exam design where common vocabulary is tested more
-    often. The sampling follows a power-law distribution per bucket:
+    高频（低 rank）词出现在测试题中的概率更高，模拟真实考试中常见词更常被测试的设计。
+    采样在每个 bucket 上遵循 power-law distribution：
 
         weight_bucket = size_bucket * (1 / median_rank_bucket) ** power
 
-    Then words are drawn within each bucket proportional to its allocation.
+    然后按 bucket 分配量在每个 bucket 内抽词。
 
     Args:
-        vocab_bank: The vocabulary bank to sample from.
-        n: Number of test questions to sample (default 100).
-        power: Power-law exponent (default 0.5). Higher values skew samples
-               more heavily toward high-frequency words.
-        seed: Random seed for reproducibility.
+        vocab_bank: 要采样的词库。
+        n: 测试题数量（默认 100）。
+        power: Power-law 指数（默认 0.5）。值越高越强烈偏向高频词。
+        seed: 用于复现的随机种子。
 
     Returns:
-        List of ``SampledWord`` with metadata, sorted by rank.
-    """
+        按 rank 排序、带元数据的 ``SampledWord`` 列表。"""
     rng = random.Random(seed)
 
-    # ── Compute per-bucket weights ──
+    # ── 计算每个 bucket 的 weights ──
     bucket_stats: dict[str, dict[str, Any]] = {}
     for label, items in vocab_bank.words_by_bucket.items():
         n_items = len(items)
@@ -809,7 +788,7 @@ def sample_test_questions(
     if total_weight <= 0:
         return []
 
-    # ── Compute allocation per bucket ──
+    # ── 计算每个 bucket 的 allocation ──
     allocations: dict[str, int] = {}
     allocated = 0
     for label, bs in bucket_stats.items():
@@ -818,13 +797,13 @@ def sample_test_questions(
         allocations[label] = alloc
         allocated += alloc
 
-    # Adjust rounding difference on the largest bucket
+    # 在最大 bucket 上调整舍入差值
     diff = n - allocated
     if diff != 0 and bucket_stats:
         biggest = max(bucket_stats, key=lambda l: bucket_stats[l]["size"])
         allocations[biggest] = max(1, allocations[biggest] + diff)
 
-    # ── Sample within each bucket ──
+    # ── 在每个 bucket 内采样 ──
     boundaries = vocab_bank.config.bucket_boundaries
     sampled: list[SampledWord] = []
     for label, bs in bucket_stats.items():

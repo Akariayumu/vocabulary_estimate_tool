@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fill remaining 90 missing translations manually."""
+"""手动补全剩余 90 个缺失翻译。"""
 import os, sys, re
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -91,7 +91,7 @@ manual = {
     'precedes': '先于',
 }
 
-# Special: non-ASCII key entries need different handling
+# 特殊情况：非 ASCII key 条目需要不同处理
 special = {
     'jose': 'jos\u00e9',
     'fiance': 'fianc\u00e9',
@@ -136,9 +136,9 @@ for i in range(len(lines)-1, -1, -1):
         break
 
 if insert_at:
-    # Normal ASCII entries
+    # 普通 ASCII 条目
     new_entries = ['    "{}": "{}",'.format(k, v) for k, v in sorted(manual.items())]
-    # Non-ASCII entries
+    # 非 ASCII 条目
     new_entries += ['    "{}": "{}",'.format(k, v) for k, v in sorted(non_ascii_entries.items())]
     
     new_lines = lines[:insert_at] + new_entries + lines[insert_at:]

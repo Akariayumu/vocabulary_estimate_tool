@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Apply v1 fixed difficulty cluster boundaries to a v2 stage vocab.
+"""将 v1 固定 difficulty cluster 边界应用到 v2 stage vocab。
 
-The boundaries are extracted from the original v1 vocabulary as the maximum
-difficulty in each existing cluster. Assignment uses the first v1 upper
-boundary that is greater than or equal to the word's current difficulty.
+边界来自原始 v1 词库中每个现有 cluster 的最大 difficulty。
+分配时使用第一个大于或等于该词当前 difficulty 的 v1 上界。
 """
 
 from __future__ import annotations

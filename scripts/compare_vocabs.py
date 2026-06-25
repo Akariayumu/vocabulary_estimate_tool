@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare stage vocabulary files for StratifiedQuiz migration impact."""
+"""比较 stage vocabulary 文件，评估 StratifiedQuiz 迁移影响。"""
 
 from __future__ import annotations
 

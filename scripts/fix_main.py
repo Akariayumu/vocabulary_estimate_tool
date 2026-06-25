@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Fix the corrupted server/main.py."""
+"""修复损坏的 server/main.py。"""
 import sys
 sys.path.insert(0, '.')
 with open('server/main.py', 'r') as f:
     content = f.read()
 
-# Remove the misplaced get_bucket_fn
+# 移除位置错误的 get_bucket_fn
 import re
-# Remove the misplaced block (inserted at wrong indent level)
+# 移除位置错误的代码块（插入到了错误缩进层级）
 old = """@lru_cache(maxsize=1)
 def get_coverage_analyzer() -> DocumentCoverageAnalyzer:
 
@@ -24,7 +24,7 @@ def get_coverage_analyzer() -> DocumentCoverageAnalyzer:
 
 content = content.replace(old, new)
 
-# Find where to insert get_bucket_fn (after get_estimator, before get_coverage_analyzer)
+# 查找 get_bucket_fn 插入位置（get_estimator 之后，get_coverage_analyzer 之前）
 insertion_point = """@lru_cache(maxsize=1)
 def get_estimator() -> VocabEstimator:
     return VocabEstimator(get_vocab_bank(), DEFAULT_CONFIG)"""

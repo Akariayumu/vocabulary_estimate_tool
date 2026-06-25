@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Validation script for the exam-level-aware smart sampling design.
+考试等级感知 smart sampling 设计的验证脚本。
 
-Compares:
-  1. Old power-law weighted sampling
-  2. New smart (sigmoid-based) sampling
-  3. Uniform interval sampling
+比较：
+  1. 旧版 power-law weighted sampling
+  2. 新版 smart（基于 sigmoid）sampling
+  3. 均匀 interval sampling
 
-Outputs allocation tables and summary statistics.
+输出 allocation 表和 summary statistics。
 """
 from __future__ import annotations
 
@@ -41,20 +41,20 @@ def main() -> None:
     total = 3000
     seed = 42
 
-    # ── 1. Old power-law allocation ──
+    # ── 1. 旧版 power-law allocation ──
     print_separator("旧方案：幂律加权采样 (power=0.7)")
     print(describe_weighted_allocation(bank, total_samples=total, power=0.7))
 
-    # ── 2. New smart allocation ──
+    # ── 2. 新版 smart allocation ──
     print_separator("新方案：考试等级边界导向智能采样 (α=4.0, γ=1.5)")
     print(describe_smart_allocation(bank, total_samples=total, alpha=4.0, info_exponent=1.5))
 
-    # ── 3. Actual smart sample ──
+    # ── 3. 实际 smart sample ──
     print_separator("新方案：实际采样 3000 词 (seed=42)")
     sampled = smart_sample_words(bank, total_samples=total, alpha=4.0, info_exponent=1.5, seed=seed)
     print(describe_sampling(sampled, bank))
 
-    # ── 4. Summary comparison table ──
+    # ── 4. 汇总对比表 ──
     print_separator("方案对比总结：分配表")
     
     old_sample = weighted_sample_words(bank, total_samples=total, power=0.7, seed=seed)
@@ -116,7 +116,7 @@ def main() -> None:
             f"  {note:>30s}"
         )
 
-    # ── 5. Compare bucket coverage rates ──
+    # ── 5. 对比 bucket 覆盖率 ──
     print_separator("各桶采样率对比 (Samples / Bank Size)")
     print(f"  {'Bucket':>6s}  {'Bank':>6s}  {'Uniform':>8s}  {'Old':>8s}  {'Smart':>8s}  {'Smart/Old':>10s}")
     print(f"  {'------':>6s}  {'------':>6s}  {'--------':>8s}  {'--------':>8s}  {'--------':>8s}  {'----------':>10s}")

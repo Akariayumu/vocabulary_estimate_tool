@@ -1,7 +1,7 @@
-"""Run repeated random-sampling checks for the vocabulary estimator.
+"""为词汇量估算器运行重复随机采样检查。
 
-Default experiment: 3 sample sizes x 3 response-noise settings x 100 runs =
-900 group-estimation trials.
+默认实验：3 种样本量 x 3 种 response-noise 设置 x 100 次运行 =
+900 次分组估算试验。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ DEFAULT_REPORT = PROJECT_ROOT / "reports" / "batch_verification_report.json"
 
 @dataclass(frozen=True)
 class VerificationCombo:
-    """One sampling/noise configuration."""
+    """一个采样/noise 配置。"""
 
     name: str
     per_bucket: int
@@ -44,7 +44,7 @@ CLASS_TRUE_VOCAB = {
 
 
 def known_probability(rank: int, true_vocab: int, sharpness: float = 4.0) -> float:
-    """Smooth probability that a learner knows a word at this frequency rank."""
+    """学习者知道某个频率 rank 单词的平滑概率。"""
 
     rank = max(1, rank)
     true_vocab = max(1, true_vocab)
@@ -58,7 +58,7 @@ def simulate_responses(
     rng: random.Random,
     noise: float,
 ) -> list[tuple[str, bool]]:
-    """Generate synthetic known/unknown responses for one learner group."""
+    """为一个学习者组生成合成 known/unknown responses。"""
 
     responses: list[tuple[str, bool]] = []
     for word, rank, _bucket in items:
@@ -70,7 +70,7 @@ def simulate_responses(
 
 
 def build_config(bootstrap_iterations: int) -> EstimatorConfig:
-    """Return a config tuned for repeated verification speed."""
+    """返回针对重复验证速度调优的配置。"""
 
     return EstimatorConfig(
         random_seed=DEFAULT_CONFIG.random_seed,
@@ -104,7 +104,7 @@ def run_combo(
     config: EstimatorConfig,
     vocab_bank: VocabBank,
 ) -> dict[str, Any]:
-    """Run repeated simulations for one combo and aggregate statistics."""
+    """针对一个组合运行重复模拟并聚合统计量。"""
 
     group_estimates = {group: [] for group in config.ordered_classes}
     adjusted_estimates = {group: [] for group in config.ordered_classes}
@@ -145,7 +145,7 @@ def run_combo(
 
 
 def summarize_values(values: list[int], adjusted: list[int], true_vocab: int) -> dict[str, Any]:
-    """Return mean/variance/error metrics for one group."""
+    """返回一个组的均值/方差/误差指标。"""
 
     if not values:
         return {
@@ -173,7 +173,7 @@ def run_verification(
     base_seed: int = 2026,
     bootstrap_iterations: int = 0,
 ) -> dict[str, Any]:
-    """Run the full 9-combo verification suite."""
+    """运行完整 9 组合验证套件。"""
 
     config = build_config(bootstrap_iterations)
     vocab_bank = VocabBank(config)

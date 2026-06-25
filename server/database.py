@@ -1,4 +1,4 @@
-"""SQLite persistence for student vocabulary-test records."""
+"""学生词汇测试记录的 SQLite 持久化。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "vocab_estimator.sqlite3"
 
 
 def get_connection(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    """Open a SQLite connection with dictionary-like rows."""
+    """打开一个返回类字典行的 SQLite 连接。"""
 
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -24,7 +24,7 @@ def get_connection(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 
 
 def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> None:
-    """Create database tables if they do not already exist."""
+    """在数据库表不存在时创建它们。"""
 
     with get_connection(db_path) as conn:
         conn.executescript(
@@ -62,7 +62,7 @@ def create_student(
     cet_score: int | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> dict[str, Any]:
-    """Insert a student and return the created row."""
+    """插入学生并返回创建的行。"""
 
     clean_name = name.strip()
     if not clean_name:
@@ -79,7 +79,7 @@ def create_student(
 
 
 def get_student(student_id: int, db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, Any] | None:
-    """Return a student by id, or None."""
+    """按 id 返回学生；不存在则返回 None。"""
 
     with get_connection(db_path) as conn:
         row = conn.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
@@ -90,7 +90,7 @@ def find_latest_student_by_name(
     name: str,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> dict[str, Any] | None:
-    """Return the most recently created student with this name."""
+    """返回该姓名最近创建的学生。"""
 
     with get_connection(db_path) as conn:
         row = conn.execute(
@@ -110,7 +110,7 @@ def get_or_create_student(
     cet_score: int | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> dict[str, Any]:
-    """Reuse a same-name student row when possible; otherwise create one."""
+    """尽可能复用同名学生行，否则创建新行。"""
 
     existing = find_latest_student_by_name(name, db_path)
     if existing is not None:
@@ -135,7 +135,7 @@ def save_test_record(
     responses: list[dict[str, Any]] | list[list[Any]] | list[tuple[Any, ...]],
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> dict[str, Any]:
-    """Insert a test record and return the saved row with student metadata."""
+    """插入测试记录，并返回带学生元数据的已保存行。"""
 
     if get_student(student_id, db_path) is None:
         raise ValueError(f"student_id {student_id} does not exist")
@@ -165,7 +165,7 @@ def save_test_record(
 
 
 def get_test_record(record_id: int, db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, Any] | None:
-    """Return one saved test record with joined student data."""
+    """返回一条已保存测试记录及关联学生数据。"""
 
     with get_connection(db_path) as conn:
         row = conn.execute(
@@ -189,7 +189,7 @@ def list_test_records(
     student_id: int | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> list[dict[str, Any]]:
-    """Return recent test records, newest first."""
+    """返回最近测试记录，按最新优先。"""
 
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
@@ -222,7 +222,7 @@ def count_test_records(
     student_id: int | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> int:
-    """Return the number of saved test records."""
+    """返回已保存测试记录数量。"""
 
     with get_connection(db_path) as conn:
         if student_id is None:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate enhanced difficulty quality against the baseline."""
+"""相对 baseline 评估 enhanced difficulty 质量。"""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _bucket_stats(diffs: dict[str, float], cluster_key: str, word_info: dict) -> dict[int, Any]:
-    """Compute per-cluster statistics."""
+    """计算每个 cluster 的统计量。"""
     clusters: dict[int, list[float]] = {}
     for word, d in diffs.items():
         info = word_info.get(word, {})
@@ -54,7 +54,7 @@ def check_anomalies(
     word_info: dict,
     label: str,
 ) -> list[dict]:
-    """Find potentially anomalous difficulty values."""
+    """查找潜在异常的 difficulty 值。"""
     anomalies: list[dict] = []
     for word, d in diffs.items():
         info = word_info.get(word, {})
@@ -73,7 +73,7 @@ def check_anomalies(
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    # Load both
+    # 加载两份数据
     with open(args.baseline, encoding="utf-8") as f:
         base_data = json.load(f)
     with open(args.enhanced, encoding="utf-8") as f:
@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         stage = base_wts.get(w, {}).get("first_stage", "?")
         print(f"  {w:20s}  stage={stage:10s}  base={b:.4f}  enh={e:.4f}  delta={d:+.4f}")
 
-    # Optional: quick simulation
+    # 可选：快速模拟
     if args.run_sim:
         print(f"\n=== Running quick simulation ({args.sim_users} users) ===")
         sys.path.insert(0, str(PROJECT_ROOT))

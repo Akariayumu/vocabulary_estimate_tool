@@ -1,4 +1,4 @@
-"""Sampling strategies for vocabulary tests."""
+"""词汇测试的采样策略。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ Response = tuple[str, bool]
 
 @dataclass(frozen=True)
 class BucketPerformance:
-    """Observed known-rate for one frequency bucket."""
+    """某个频率 bucket 的观测已知率。"""
 
     bucket: str
     asked: int
@@ -40,7 +40,7 @@ WARMUP_COUNTS: dict[str, int] = {
 }
 
 
-# Warmup result -> (level_label, point_estimate, exam_set, norm_mu, norm_sigma)
+# Warmup 结果 -> (level_label, point_estimate, exam_set, norm_mu, norm_sigma)
 WARMUP_LEVELS: list[tuple[str, int, int, str, int, int]] = [
     ("高中", 3500, 0, "gaokao", 3000, 2000),
     ("四级", 4500, 1, "gaokao+cet6", 4500, 2500),
@@ -50,7 +50,7 @@ WARMUP_LEVELS: list[tuple[str, int, int, str, int, int]] = [
 
 
 def get_exam_vocab_words(exam_vocab_dir: str | None = None) -> dict[str, list[str]]:
-    """Load exam vocabulary words from text files."""
+    """从文本文件加载考试词汇。"""
     import os
     from pathlib import Path
 
@@ -81,7 +81,7 @@ def get_exam_vocab_words(exam_vocab_dir: str | None = None) -> dict[str, list[st
 
 
 class VocabularySampler:
-    """Generate stratified and adaptive word lists with deterministic sampling."""
+    """使用确定性采样生成分层和 adaptive 词表。"""
 
     def __init__(
         self,
@@ -94,7 +94,7 @@ class VocabularySampler:
         self.rng = random.Random(config.random_seed if seed is None else seed)
 
     def balanced_sample(self, per_bucket: int | None = None) -> list[TestItem]:
-        """Sample a fixed number of words from each frequency bucket."""
+        """从每个频率 bucket 抽取固定数量的词。"""
 
         count = per_bucket or self.config.default_sample_per_bucket
         selected: list[TestItem] = []
@@ -108,11 +108,10 @@ class VocabularySampler:
         total_count: int = 40,
         exclude_seen: bool = True,
     ) -> list[TestItem]:
-        """Sample more densely around the estimated ability boundary.
+        """在估计能力边界附近进行更密集采样。
 
-        Buckets whose observed known-rate is closest to 0.5 receive the largest
-        share of the next batch. The method still includes at least one item from
-        every non-empty bucket to keep the test calibrated.
+        观测已知率最接近 0.5 的 bucket 会获得下一批中最大的份额。
+        为保持测试校准，每个非空 bucket 仍至少包含一个 item。
         """
 
         responses = list(previous_responses)
@@ -122,7 +121,7 @@ class VocabularySampler:
         if not performances:
             return self.balanced_sample(max(1, total_count // len(self.vocab_bank.words_by_bucket)))
 
-        # Smaller distance to 0.5 means closer to the learner's boundary.
+        # 距离 0.5 越小，表示越接近学习者边界。
         weights: dict[str, float] = {}
         for perf in performances:
             weights[perf.bucket] = 1.0 / (0.05 + perf.distance_to_boundary)
@@ -165,14 +164,14 @@ class VocabularySampler:
         previous_responses: Iterable[Response] | None = None,
         adaptive_count: int = 40,
     ) -> list[TestItem]:
-        """Return a balanced first-stage list or an adaptive follow-up list."""
+        """返回均衡的第一阶段列表，或 adaptive 后续列表。"""
 
         if previous_responses is None:
             return self.balanced_sample(per_bucket=per_bucket)
         return self.adaptive_sample(previous_responses, total_count=adaptive_count)
 
     def bucket_performance(self, responses: Iterable[Response]) -> list[BucketPerformance]:
-        """Summarize observed known-rate by bucket."""
+        """按 bucket 汇总观测已知率。"""
 
         stats: dict[str, list[bool]] = defaultdict(list)
         for word, known in responses:
@@ -200,19 +199,19 @@ class VocabularySampler:
         stage1_responses: Iterable[Response],
         extra_per_bucket: int | None = None,
     ) -> tuple[list[TestItem], list[str]]:
-        """Generate Stage 2 words: refine sampling of boundary buckets.
+        """生成 Stage 2 词：细化边界 bucket 的采样。
 
-        Returns (new_test_items, boundary_bucket_labels).
+        返回 (new_test_items, boundary_bucket_labels)。
         """
         from .config import bucket_beta_prior
 
         responses = list(stage1_responses)
         extra = extra_per_bucket or self.config.stage2_extra_per_bucket
 
-        # Words already seen in Stage 1
+        # Stage 1 中已经见过的词
         seen = {word.lower() for word, _ in responses}
 
-        # Compute per-bucket stats using Bayesian smoothing
+        # 使用 Bayesian smoothing 计算每个 bucket 的统计量
         stats: dict[str, list[bool]] = defaultdict(list)
         for word, known in responses:
             bucket = self.vocab_bank.get_bucket(word)
@@ -234,7 +233,7 @@ class VocabularySampler:
             if self.config.stage2_boundary_low <= smoothed <= self.config.stage2_boundary_high:
                 boundary_buckets.append(bucket)
 
-        # Sample extra words from each boundary bucket
+        # 从每个边界 bucket 额外采样
         new_items: list[TestItem] = []
         for bucket in boundary_buckets:
             batch = self._sample_bucket(bucket, extra, exclude=seen)
@@ -244,9 +243,9 @@ class VocabularySampler:
         return new_items, boundary_buckets
 
     def warmup_sample(self) -> tuple[list[TestItem], dict[str, int]]:
-        """Generate 10 warmup questions with mixed difficulty.
+        """生成 10 道混合难度 warmup 题。
 
-        Returns (items, sources) where sources maps each word to its difficulty level.
+        返回 (items, sources)，其中 sources 将每个词映射到其难度等级。
         """
         selected: list[TestItem] = []
         sources: dict[str, int] = {}
@@ -277,15 +276,14 @@ class VocabularySampler:
         exclude_seen: bool = True,
         seen_words: set[str] | None = None,
     ) -> list[TestItem]:
-        """Generate adaptive test questions based on warmup level.
+        """根据 warmup 等级生成 adaptive 测试题。
 
-        Uses normal distribution sampling centered on the estimated level.
-        The candidate pool is limited to CET-6 exam vocabulary words,
-        with each word retaining its original wordfreq rank.
+        使用以估计等级为中心的正态分布采样。
+        候选池限制为 CET-6 考试词汇，每个词保留原始 wordfreq rank。
         """
         seen = set(seen_words) if seen_words else set()
 
-        # Determine warmup level index
+        # 确定 warmup 等级索引
         correct = warmup_correct
         if correct <= 3:
             level_idx = 0
@@ -298,11 +296,11 @@ class VocabularySampler:
 
         _, _, _, _, mu, sigma = WARMUP_LEVELS[level_idx]
 
-        # Load CET-6 words as the candidate pool (always CET-6)
+        # 加载 CET-6 词作为候选池（始终使用 CET-6）
         exam_words_data = get_exam_vocab_words()
         exam_words = exam_words_data.get("cet6", [])
 
-        # Filter CET-6 words that exist in vocab bank
+        # 过滤出词库中存在的 CET-6 词
         valid_candidates: list[VocabItem] = []
         for word in exam_words:
             item = self.vocab_bank.item_by_word.get(word) or self.vocab_bank.item_by_lemma.get(word)
@@ -310,7 +308,7 @@ class VocabularySampler:
                 valid_candidates.append(item)
 
         if not valid_candidates:
-            # Fallback: use all bank items
+            # fallback：使用全部词库 item
             valid_candidates = [
                 item for item in self.vocab_bank.items
                 if item.word.lower() not in seen
@@ -319,12 +317,12 @@ class VocabularySampler:
         if not valid_candidates:
             return []
 
-        # Ensure diversity by first selecting some items from each tier
-        # around the estimated level, then fill with pure weighted sampling.
+        # 为保证多样性，先从估计等级附近的每个 tier 选取一些 item，
+        # 再用纯 weighted sampling 补足。
 
-        # Tier 1 (60%): items within mu +/- sigma (core range)
-        # Tier 2 (25%): items within mu +/- 2*sigma (extended range)
-        # Tier 3 (15%): remaining candidates (spread)
+        # Tier 1 (60%)：mu +/- sigma 内的 item（核心范围）
+        # Tier 2 (25%)：mu +/- 2*sigma 内的 item（扩展范围）
+        # Tier 3 (15%)：剩余候选（扩散范围）
 
         tier1: list[VocabItem] = []
         tier2: list[VocabItem] = []
@@ -339,7 +337,7 @@ class VocabularySampler:
             else:
                 tier3.append(item)
 
-        # Shuffle within each tier for stochastic selection
+        # 在每个 tier 内 shuffle，以便随机选择
         self.rng.shuffle(tier1)
         self.rng.shuffle(tier2)
         self.rng.shuffle(tier3)
@@ -348,7 +346,7 @@ class VocabularySampler:
         n2 = min(int(total_count * 0.25), len(tier2))
         n3 = min(total_count - n1 - n2, len(tier3))
 
-        # Distribute remaining slots
+        # 分配剩余名额
         remaining = total_count - n1 - n2 - n3
         for _ in range(remaining):
             if len(tier1) > n1:
@@ -372,9 +370,9 @@ class VocabularySampler:
                 used.add(item.word.lower())
                 taken += 1
 
-        # If still short, fall through to weighted fill
+        # 若仍不足，则回退到 weighted fill
         if len(selected) < total_count:
-            # Compute normal PDF weights for all candidates
+        # 为所有候选计算 normal PDF 权重
             weighted_pool: list[tuple[float, VocabItem]] = []
             for item in valid_candidates:
                 if item.word.lower() in used:

@@ -1,4 +1,4 @@
-"""FastAPI application for the English vocabulary-size estimator."""
+"""英语词汇量估算器的 FastAPI 应用。"""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ VOCAB_VERSION_CANONICAL = {
 
 
 class StudentPayload(BaseModel):
-    """Student metadata used when saving a test record."""
+    """保存测试记录时使用的学生元数据。"""
 
     id: int | None = None
     name: str = "匿名学生"
@@ -55,7 +55,7 @@ class StudentPayload(BaseModel):
 
 
 class SaveTestPayload(BaseModel):
-    """Payload for persisting a completed vocabulary test."""
+    """持久化已完成词汇测试的 payload。"""
 
     student: StudentPayload = Field(default_factory=StudentPayload)
     responses: list[Any]
@@ -63,7 +63,7 @@ class SaveTestPayload(BaseModel):
 
 
 class ArticleEstimatePayload(BaseModel):
-    """Payload for estimating article vocabulary demand."""
+    """估算文章词汇需求的 payload。"""
 
     article: str = Field(..., min_length=1)
     vocab_version: str | None = None
@@ -88,7 +88,7 @@ def get_sampler(seed: int | None = None) -> VocabularySampler:
 
 
 def normalize_vocab_version(vocab_version: str | None = None) -> str:
-    """Return the canonical stage-vocab version name."""
+    """返回规范的 stage-vocab 版本名。"""
 
     key = str(vocab_version or "v1").strip().lower()
     if key not in VOCAB_VERSION_CANONICAL:
@@ -101,7 +101,7 @@ def normalize_vocab_version(vocab_version: str | None = None) -> str:
 
 
 def get_vocab_path(vocab_version: str = "v1") -> Path:
-    """Map a stage-vocab version name or alias to the JSON file path."""
+    """将 stage-vocab 版本名或别名映射到 JSON 文件路径。"""
 
     canonical = normalize_vocab_version(vocab_version)
     return VOCAB_VERSION_PATHS[canonical]
@@ -120,7 +120,7 @@ def get_stratified_quiz(
     phase1_question_count: int | None = None,
     vocab_version: str = "v1",
 ) -> StratifiedQuiz:
-    # v2 StratifiedQuiz is the production quiz model; legacy v1 endpoints remain for compatibility.
+    # v2 StratifiedQuiz 是生产测验模型；旧版 v1 endpoints 为兼容性保留。
     question_count = phase1_question_count or DEFAULT_CONFIG.phase1_question_count
     canonical_version = normalize_vocab_version(vocab_version)
     return StratifiedQuiz(
@@ -158,7 +158,7 @@ def index() -> FileResponse:
 
 @app.post("/api/estimate")
 def estimate(payload: Any = Body(...)) -> dict[str, Any]:
-    """Estimate one learner's vocabulary size from word-response pairs."""
+    """根据词-作答对估算单个学习者的词汇量。"""
 
     responses = parse_response_payload(payload)
     if not responses:
@@ -174,7 +174,7 @@ def estimate(payload: Any = Body(...)) -> dict[str, Any]:
 
 @app.post("/api/estimate/groups")
 def estimate_groups(payload: Any = Body(...)) -> dict[str, Any]:
-    """Estimate C/F/P/K learner groups and report ordering consistency."""
+    """估算 C/F/P/K 学习者组，并报告顺序一致性。"""
 
     groups = parse_group_payload(payload)
     if not groups:
@@ -190,7 +190,7 @@ def estimate_groups(payload: Any = Body(...)) -> dict[str, Any]:
 
 @app.get("/api/vocabulary/stats")
 def vocabulary_stats() -> dict[str, Any]:
-    """Return vocabulary-bank statistics."""
+    """返回词库统计信息。"""
 
     bank = get_vocab_bank()
     return {
@@ -217,7 +217,7 @@ def vocabulary_sample(
     per_bucket: int = Query(default=4, ge=1, le=30),
     seed: int | None = Query(default=None),
 ) -> dict[str, Any]:
-    """Return a balanced word list for the browser test."""
+    """返回浏览器测试使用的均衡词表。"""
 
     items = get_sampler(seed).balanced_sample(per_bucket=per_bucket)
     return {
@@ -235,7 +235,7 @@ def vocabulary_quiz(
     per_bucket: int = Query(default=4, ge=1, le=30),
     seed: int | None = Query(default=None),
 ) -> dict[str, Any]:
-    """Return a balanced browser quiz with Chinese options when available."""
+    """返回均衡的浏览器测验，并在可用时附带中文选项。"""
 
     effective_seed = seed if seed is not None else random.SystemRandom().randint(1, 1_000_000_000)
     rng = random.Random(effective_seed)
@@ -251,14 +251,13 @@ def vocabulary_quiz(
 
 @app.post("/api/vocabulary/quiz-stage2")
 def vocabulary_quiz_stage2(payload: Any = Body(...)) -> dict[str, Any]:
-    """Return Stage 2 refined quiz questions targeting boundary buckets.
+    """返回面向边界 buckets 的 Stage 2 精细测验题。
 
-    Accepts the Stage 1 (or adaptive) responses and generates additional
-    questions for buckets where the learner's known-rate is in the uncertain
-    range. When warmup_correct is provided, the Stage 2 scope is reduced:
-    fewer extra questions and fewer boundary buckets are targeted.
+    接收 Stage 1（或 adaptive）responses，并为学习者已知率落在不确定区间的
+    buckets 生成追加问题。提供 warmup_correct 时会缩小 Stage 2 范围：
+    追加题更少，目标边界 buckets 也更少。
     """
-    # Support both raw response list and dict with warmup info
+    # 同时支持原始 response 列表和带 warmup 信息的 dict
     if isinstance(payload, dict) and "responses" in payload:
         raw_responses = payload["responses"]
         warmup_correct = payload.get("warmup_correct")
@@ -274,18 +273,18 @@ def vocabulary_quiz_stage2(payload: Any = Body(...)) -> dict[str, Any]:
     rng = random.Random(effective_seed)
     sampler = get_sampler(effective_seed)
 
-    # Reduced Stage 2 when warmup info is available
+    # 有 warmup 信息时缩减 Stage 2
     if warmup_correct is not None:
-        # Use fewer extra questions per bucket (3-4 instead of 8)
+        # 每个 bucket 使用更少追加题（3-4 道，而不是 8 道）
         extra_per_bucket = 3
-        # Only target 2-3 buckets near estimated level
+        # 仅针对估计等级附近的 2-3 个 bucket
         items, boundary_buckets = sampler.stage2_refine_sample(
             responses, extra_per_bucket=extra_per_bucket
         )
-        # If too many buckets, keep only the closest to estimated boundary
+        # 如果 bucket 过多，只保留最接近估计边界的 bucket
         if len(boundary_buckets) > 3:
             boundary_buckets = boundary_buckets[:3]
-            # Re-sample limited to these buckets
+            # 重新采样限制在这些 bucket 内
             seen = {word.lower() for word, _ in responses}
             items = []
             for bucket in boundary_buckets:
@@ -312,7 +311,7 @@ def vocabulary_quiz_stage2(payload: Any = Body(...)) -> dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Stratified quiz v2 endpoints
+# 分层测验 v2 endpoints
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -323,13 +322,12 @@ def vocabulary_quiz_v2(
     question_count: int | None = Query(default=None, ge=1, le=40),
     vocab_version: str = Query(default="v1"),
 ) -> dict[str, Any]:
-    """Phase 1: stratified sampling questions.
+    """Phase 1：分层采样题目。
 
-    Returns 30 questions by default, configurable up to the legacy 40-question
-    path. By default uses streaming stratified sampling;
-    set ``balanced=True`` for simple 2-per-class sampling.
+    默认返回 30 题，也可配置到旧版 40 题路径。默认使用流式分层采样；
+    设置 ``balanced=True`` 可使用简单的每类 2 题采样。
     """
-    # Time-based seed ensures different words per request without mutating the shared quiz.
+    # 基于时间的 seed 确保每次请求词不同，同时不修改共享 quiz。
     canonical_version = normalize_vocab_version(vocab_version)
     effective_seed = seed if seed is not None else int(time.time() * 1000) % (2**31)
     rng = random.Random(effective_seed)
@@ -354,7 +352,7 @@ def vocabulary_quiz_v2_stream(
     payload: Any = Body(...),
     vocab_version: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    """Streaming estimate from answered v2 responses plus the next 5 questions."""
+    """基于已答 v2 responses 做流式估算，并给出接下来的 5 题。"""
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="payload must be an object")
 
@@ -415,13 +413,13 @@ def vocabulary_quiz_v2_stage2(
     payload: Any = Body(...),
     vocab_version: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    """Phase 2: refined questions for low-confidence difficulty classes.
+    """Phase 2：针对低置信难度类别的精细问题。
 
-    Payload format::
+    Payload 格式::
 
         {
             "responses": [{"word": "...", "known": true}, ...],
-            "theta": null  # optional, omit to auto-compute
+            "theta": null  # 可选，省略时自动计算
         }
     """
     raw_responses = payload.get("responses", [])
@@ -442,11 +440,11 @@ def vocabulary_quiz_v2_stage2(
 
     low_conf = quiz._identify_low_confidence(responses)
 
-    # Bug 2: time-based seed for each request
+    # Bug 2：每次请求使用基于时间的 seed
     effective_seed = int(time.time() * 1000) % (2**31)
     rng = random.Random(effective_seed)
 
-    # extract all Phase 1 words so Phase 2 doesn't re-test them
+    # 提取全部 Phase 1 词，避免 Phase 2 重复测试
     phase1_words = {word.lower() for word, _ in responses}
 
     phase2_items = quiz.phase2_sample(
@@ -481,10 +479,9 @@ def vocabulary_quiz_v2_estimate(
     payload: Any = Body(...),
     vocab_version: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    """Estimate vocabulary from v2 quiz responses using the Rasch model.
+    """使用 Rasch model 根据 v2 测验 responses 估算词汇量。
 
-    Accepts all Phase 1 (and optional Phase 2) responses and returns
-    the Rasch-based vocabulary estimate.
+    接收所有 Phase 1（以及可选 Phase 2）responses，返回基于 Rasch 的词汇量估算。
     """
     responses = parse_response_payload(payload)
     if not responses:
@@ -509,7 +506,7 @@ def estimate_article_v2(
     payload: ArticleEstimatePayload,
     vocab_version: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    """Estimate article vocabulary demand from stage_vocab difficulty data."""
+    """根据 stage_vocab difficulty 数据估算文章词汇需求。"""
 
     canonical_version = normalize_vocab_version(vocab_version or payload.vocab_version)
     try:
@@ -522,7 +519,7 @@ def estimate_article_v2(
 
 @app.post("/api/tests/save")
 def save_test(payload: SaveTestPayload) -> dict[str, Any]:
-    """Save a student's completed test record into SQLite."""
+    """将学生完成的测试记录保存到 SQLite。"""
 
     responses = parse_response_payload(payload.responses)
     if not responses:
@@ -563,10 +560,10 @@ def build_quiz_question(
     bucket: str,
     rng: random.Random,
 ) -> dict[str, Any]:
-    """Build one multiple-choice question or a binary fallback item.
+    """构造一道选择题，或构造二元 fallback 题。
 
-    ~30% of questions are "trap questions" where all four options are wrong.
-    Users must pick "没有正确答案" to answer correctly.
+    约 30% 的题是“陷阱题”，四个选项全都错误。
+    用户必须选择“没有正确答案”才算答对。
     """
 
     TRAP_PROBABILITY = 0.1
@@ -621,7 +618,7 @@ def build_quiz_question(
 
 
 def build_v2_question(item: dict[str, Any], rng: random.Random) -> dict[str, Any]:
-    """Build a browser question from one StratifiedQuiz stage-vocab item."""
+    """根据一个 StratifiedQuiz stage-vocab item 构造浏览器题目。"""
 
     diff_label = f"cluster_{item.get('cluster_20', 'unknown')}"
     question = build_quiz_question(
@@ -640,7 +637,7 @@ def build_v2_question(item: dict[str, Any], rng: random.Random) -> dict[str, Any
 
 
 def translation_for(word: str) -> str | None:
-    """Return a Chinese gloss for a word or its normalized lemma."""
+    """返回某个词或其归一化 lemma 的中文释义。"""
 
     lower = word.strip().lower()
     if lower in TRANSLATIONS:
@@ -655,10 +652,10 @@ def distractor_translations(
     rng: random.Random,
     count: int = 3,
 ) -> list[str]:
-    """Pick unique Chinese distractors, preferring the same frequency bucket.
+    """挑选不重复的中文干扰项，并优先使用相同频率 bucket。
 
-    For v2-style buckets (``"cluster_*"``) this skips ``VocabBank`` entirely
-    and uses only ``TRANSLATIONS``, avoiding wordfreq loading.
+    对 v2 风格 buckets（``"cluster_*"``），此处完全跳过 ``VocabBank``，
+    只使用 ``TRANSLATIONS``，避免加载 wordfreq。
     """
 
     exclude = {word.strip().lower()}
@@ -680,10 +677,10 @@ def distractor_translations(
         return values
 
     if bucket.startswith("cluster_"):
-        # v2 path: skip VocabBank entirely, use TRANSLATIONS only
+        # v2 路径：完全跳过 VocabBank，只使用 TRANSLATIONS
         return collect(list(TRANSLATIONS))[:count]
 
-    # v1 path: use VocabBank for same-bucket distractors
+    # v1 路径：使用 VocabBank 选择同 bucket 干扰项
     bank = get_vocab_bank()
 
     same_bucket_words = [item.word for item in bank.get_items_in_bucket(bucket)]
@@ -713,7 +710,7 @@ def records(
     offset: int = Query(default=0, ge=0),
     student_id: int | None = Query(default=None, ge=1),
 ) -> dict[str, Any]:
-    """Query historical test records."""
+    """查询历史测试记录。"""
 
     return {
         "records": list_test_records(limit=limit, offset=offset, student_id=student_id),
@@ -724,7 +721,7 @@ def records(
 
 
 def parse_response_payload(payload: Any) -> list[tuple[str, bool]]:
-    """Normalize accepted response shapes into ``[(word, known), ...]``."""
+    """将可接受的 response 形状归一化为 ``[(word, known), ...]``。"""
 
     raw = payload.get("responses") if isinstance(payload, dict) and "responses" in payload else payload
     if not isinstance(raw, list):
@@ -743,7 +740,7 @@ def parse_response_payload(payload: Any) -> list[tuple[str, bool]]:
 
         if not isinstance(word, str) or not word.strip():
             raise HTTPException(status_code=400, detail=f"word at index {idx} must be a string")
-        # Strict boolean validation: reject strings like "false" (non-empty str → True bug)
+        # 严格布尔校验：拒绝 "false" 这类字符串（非空 str → True 的 bug）
         if not isinstance(known, bool):
             raise HTTPException(status_code=400, detail=f"known at index {idx} must be a boolean (true/false), got {type(known).__name__}")
         responses.append((word.strip(), known))
@@ -751,14 +748,14 @@ def parse_response_payload(payload: Any) -> list[tuple[str, bool]]:
 
 
 def _strict_bool(val):
-    """Parse known field: only True/False accepted; 'false'/'true' strings → 400."""
+    """解析 known 字段：只接受 True/False；'false'/'true' 字符串返回 400。"""
     if isinstance(val, bool):
         return val
     raise HTTPException(status_code=400, detail=f"known must be a boolean, got {type(val).__name__}")
 
 
 def parse_group_payload(payload: Any) -> dict[str, list[tuple[str, bool]]]:
-    """Normalize group payloads into ``{group_name: responses}``."""
+    """将组 payload 归一化为 ``{group_name: responses}``。"""
 
     if isinstance(payload, dict) and "groups" in payload:
         raw_groups = payload["groups"]
