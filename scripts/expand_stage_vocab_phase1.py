@@ -34,12 +34,20 @@ DEFAULT_STAGE_VOCAB = PROJECT_ROOT / "data" / "stage_vocab.json"
 DEFAULT_ENHANCED_VOCAB = PROJECT_ROOT / "data" / "stage_vocab_enhanced.json"
 DEFAULT_REPORT = PROJECT_ROOT / "outputs" / "vocab_expansion_report.md"
 EXAM_DIR = PROJECT_ROOT / "data" / "exam_vocab"
-EXAMPLE_DOCS = {
+EXTRA_DOC_DIR = Path("/tmp/extra_materials/语料")
+EXTRA_DOCS = {
+    "C": EXTRA_DOC_DIR / "C.txt",
+    "F": EXTRA_DOC_DIR / "F.txt",
+    "P": EXTRA_DOC_DIR / "P.txt",
+    "K": EXTRA_DOC_DIR / "K.txt",
+}
+FALLBACK_DOCS = {
     "C": PROJECT_ROOT / "examples" / "doc_c.txt",
     "F": PROJECT_ROOT / "examples" / "doc_f.txt",
     "P": PROJECT_ROOT / "examples" / "doc_p.txt",
     "K": PROJECT_ROOT / "examples" / "doc_k.txt",
 }
+ARTICLE_DOCS = EXTRA_DOCS if all(path.exists() for path in EXTRA_DOCS.values()) else FALLBACK_DOCS
 
 TOKEN_RE = re.compile(r"^[A-Za-z]+(?:-[A-Za-z]+)*$")
 LOWER_TOKEN_RE = re.compile(r"^[a-z]+(?:-[a-z]+)*$")
@@ -775,6 +783,7 @@ def write_report(
         f"- 增强词库：`{len(enhanced_entries):,}` 个词条",
         f"- 新增词条：`{len(new_entries):,}` 个",
         f"- 输出文件：`data/stage_vocab_enhanced.json`",
+        f"- 测试语料：`{ARTICLE_DOCS['C'].parent}`",
         "",
         "## 外部词表覆盖率",
         "",
@@ -883,11 +892,11 @@ def enhance_vocab(
 
     before_articles = {
         label: article_metrics(path, input_path)
-        for label, path in EXAMPLE_DOCS.items()
+        for label, path in ARTICLE_DOCS.items()
     }
     after_articles = {
         label: article_metrics(path, output_path)
-        for label, path in EXAMPLE_DOCS.items()
+        for label, path in ARTICLE_DOCS.items()
     }
     write_report(
         report_path,
