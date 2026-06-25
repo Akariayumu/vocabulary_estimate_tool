@@ -6,14 +6,18 @@
 | --- | --- |
 | 学校 | 广州大学 |
 | 学院 | 计算机科学与网络工程学院 |
-| 专业年级 | 软件工程 |
-| 成员 | 待填（单人完成） |
+| 专业 | 软件工程 |
+| 课程设计题目 | 英语词汇量估计工具 |
+| 成员 | 单人完成 |
+| 完成时间 | 2026 年 6 月 |
 
 ## 一、课程设计目的
 
-本课程设计以"英语词汇量估计工具"为对象，按照软件工程思路完成需求分析、系统设计、编码实现、测试验证与部署维护的完整流程，训练工程综合能力。
+本课程设计以“英语词汇量估计工具”为对象，按照软件工程方法完成需求分析、系统设计、算法实现、前后端开发、实验验证、文档整理和服务器部署的完整闭环。项目不是简单的网页表单或词表查询，而是一个结合教育词表、词频统计、Rasch 项目反应理论、分层抽样、文章词汇需求估算和在线部署的综合系统。通过该项目，可以训练软件工程课程中要求的需求拆解、模块划分、接口设计、数据持久化、测试验证和迭代优化能力。
 
-词汇量估计不是简单计数，它涉及词库构建、难度标注、用户答题建模、前后端交互、数据库持久化和模拟评估，适合作为软件工程综合训练题目。项目需要支持两类场景：(1)用户通过选择题或二元判断题完成词汇量测试，系统返回估计值、等级和置信区间；(2)用户输入英文文章，系统估计理解该文章所需词汇量。项目经历了从 V1 词频桶模型到 V2 Rasch 1PL IRT 模型的演进，体现了设计→实现→测试→修正的迭代过程。
+词汇量估计问题具有较强的工程代表性。首先，系统需要把原始考试词表、课程阶段词表、COCA 高频词、TOEFL/GRE 学术词等异构数据统一成可查询的词库；其次，系统需要为每个词设计可解释的难度分数，并用少量题目推断用户的潜在词汇能力；再次，系统还需要把模型结果转化为用户能理解的词汇量、等级和置信区间。项目开发过程中经历了 V1 词库与旧校准、文章估算覆盖率不足、扩展词库后量表漂移、v2 校准参数搜索、置信区间过宽等问题，最终形成了当前包含多版本词库、可切换前后端、可部署运行的系统。
+
+本报告的目标是对课程设计成果进行完整整理：保留原报告中 Rasch 模型、分层采样、合成用户模拟和 C/F/P/K 四类文章测试的核心内容，同时补充 2026 年 6 月 25 日完成的最新工作，包括四个词库版本、文章估算优化、v2 校准结论、v2 置信区间优化、线上部署、全项目中文注释和新增可复现实验脚本。
 
 ## 二、课程设计内容
 
@@ -21,215 +25,335 @@
 
 英语词汇量估计工具。
 
+系统面向英语学习者和教学场景，提供两类核心能力：第一，用户通过选择题或二元判断题完成词汇量测试，系统基于作答记录估计其英语词汇量；第二，用户输入一篇英文文章，系统分析文章内容词难度，估计读懂该文章大致需要的词汇量水平。相比传统按认识比例外推的做法，本系统采用 Rasch 1PL 模型，使“词的难度”和“用户能力”位于同一 logit 空间，并用概率求和得到平滑词汇量估计。
+
 ### 2.2 提交内容
 
-**数据层**：VocabBank 词族词库 21,738 词；stage_vocab.json 共 11,418 个可用词，含 difficulty 分数、cluster_20/cluster_100 聚类标签、教育阶段标注和翻译字段；英中翻译字典 22,887 条，覆盖率 100%；考试词表（高考/CET-6/TOEFL/GRE/COCA20000 等多套）。
+本项目提交内容包括代码、数据、部署配置、实验输出和文档五部分。
 
-**算法设计**：核心模型为 Rasch 1PL IRT，辅助有 V1 分桶矩阵参数模型、分层自适应采样（StratifiedQuiz）、文章词汇量估算（累计百分位法）、PAVA 保序回归群组对比。
+**数据与词库文件**：项目保留四个 stage vocabulary 版本，支持实验复现和生产回退。
 
-**前后端与数据库**：后端 FastAPI + uvicorn，前端 HTML + JS + CSS，SQLite 数据库存储学生记录和测试记录。
+| 词库文件 | 词数 | 定位 | 说明 |
+| --- | ---: | --- | --- |
+| `data/stage_vocab.json` | 11,418 | v1 原始词库 | 国内阶段词表与考试词表融合后的生产基准词库 |
+| `data/stage_vocab_enhanced.json` | 19,801 | enhanced 过渡词库 | 在 v1 上加入 COCA、TOEFL、GRE 和现代领域词，使用扩展时的 boost 难度 |
+| `data/stage_vocab_v2.json` | 19,801 | v2 统一标定词库 | 按 wordfreq rank、COCA rank、考试来源重新统一计算 difficulty |
+| `data/stage_vocab_v2_clusterv1.json` | 19,801 | v2 固定聚类词库 | 使用 v1 difficulty 边界重建 cluster，作为当前前后端 v2 选择项 |
+
+**算法与后端代码**：核心模块位于 `vocab_estimator/` 和 `server/`。`stratified_quiz.py` 实现 Rasch 分层测验、能力拟合、词汇量估计和置信区间；`article_estimator.py` 实现文章分词、停用词过滤、规则 lemma 和累计百分位估算；`server/main.py` 提供 FastAPI 接口，并支持通过 `vocab_version` 在 v1 与 v2 词库间切换。
+
+**前端与交互代码**：`web/index.html`、`web/app.js`、`web/styles.css` 实现浏览器端测试流程、文章估算页面、历史记录页面和词库版本下拉框。前端当前显示“原始词库 v1, 11,418词”和“扩展词库 v2, 19,801词”，测试接口和文章估算接口都会随用户选择传递 `vocab_version`。
+
+**实验与工具脚本**：项目新增并保留了可复现实验脚本，包括 `scripts/expand_vocab.py`、`scripts/redesign_difficulty.py`、`scripts/apply_v1_clustering.py`、`scripts/compare_vocabs.py`、`scripts/calibrate_v2.py`，以及原有的 `tests/simulation_eval.py`、`scripts/explore_question_count.py`、`scripts/validate_hybrid_bisection.py` 等。
+
+**项目文档**：`docs/` 下整理了技术架构、文章估算、分层测验、难度评分、阶段模型、考试词表校准、校准管线、词向量实验、代码审计和课程设计报告；`outputs/` 下保存词库扩展报告、词库迁移报告和 v2 校准搜索结果。
 
 ### 2.3 功能列表
 
-**基本功能：**
-1. 词汇量选择测试（四选一中文释义 / 二选一认识不认识）
-2. 文章词汇量估算（输入英文文章，输出词汇量估计 + 教育阶段 + 难度分布）
-3. 两阶段自适应测试（Phase 1 分层抽样 40 题 + Phase 2 低置信类边界细化）
-4. 词汇量估算置信区间（Fisher 信息量 → 95% CI）
-5. 后台批处理测试（tests/simulation_eval.py 批量评估）
+系统已实现以下基本功能：
 
-**扩展功能：**
-1. 群组对比（C/F/P/K 四类，PAVA 保序回归约束 C ≥ F ≥ P ≥ K）
-2. Streaming 渐进式测试细化（边答题边更新估计结果，支持 15/25/30/40 题渐进）
-3. 考试词表锚点校准（中考→高考→CET-4→CET-6 嵌套词表）
-4. 参数训练管线（合成数据生成 + 桶矩阵训练 + 校准参数训练）
+1. 词汇量选择测试：后端生成按难度分层的选择题，前端以四选一中文释义或二元认识判断方式呈现。
+2. Rasch 词汇量估计：根据用户作答记录拟合能力参数 θ，并对词库中每个词求 `P(known | θ)` 后累加。
+3. 置信区间与置信度标签：根据 Fisher 信息量计算 θ 的标准误，再映射为词汇量区间；v2 版本使用更适合新量表的区间收缩参数。
+4. 文章词汇量估算：输入英文文章后，系统返回估算词汇量、教育阶段、difficulty 中位数、覆盖率、内容词数、唯一词数和未匹配词样例。
+5. 词库版本切换：前端下拉框支持 v1/v2，后端 `/api/vocabulary/quiz-v2`、`/api/vocabulary/quiz-v2/estimate`、`/api/vocabulary/quiz-v2-stage2`、`/api/v2/estimate/article` 均支持 `vocab_version`。
+6. 后台批处理实验：通过模拟用户和固定语料批量评估 MAE、RMSE、R²、偏差、分桶误差和题量消融结果。
+7. 部署运行：项目已部署到 `154.83.85.36`，采用 nginx + uvicorn + systemd 方式运行，设置 production 模式以跳过不必要的 spaCy 依赖。
+
+系统还实现了若干扩展能力：C/F/P/K 四类语料对比、PAVA 保序群组对比设计、Streaming 渐进式测试、考试词表锚点校准方案、词向量难度校正实验、词库迁移评估和 Codex 代码审计。全项目注释已完成中文化，覆盖 `server/`、`vocab_estimator/`、`scripts/`、`tests/`、`web/`、`optim/`、`verification/` 等目录，并通过 Python AST、Node 语法检查和 `git diff --check`。
 
 ## 三、项目环境要求
 
-硬件方面，普通 PC 即可完成推理和演示，V100 GPU 用于参数训练和模拟。软件环境为 Linux、Python 3.12+、FastAPI、uvicorn、NumPy/PyTorch、wordfreq、spaCy en_core_web_sm。开发工具为 VS Code 和 Git，部署使用 nginx 反向代理 + systemd 服务。
+项目可在普通 Linux 服务器或个人 PC 上运行。开发和部署环境如下。
+
+| 类别 | 要求 |
+| --- | --- |
+| 操作系统 | Linux，当前部署为服务器环境 |
+| Python | Python 3.12+ |
+| 后端框架 | FastAPI + uvicorn |
+| 前端 | 原生 HTML / JavaScript / CSS |
+| 数据存储 | SQLite，用于学生记录和测试记录 |
+| 词频与数据处理 | wordfreq、NumPy，部分训练脚本使用 PyTorch |
+| NLP 处理 | 文章估算主流程使用正则和规则 lemma，生产模式可跳过 spaCy |
+| 部署 | nginx 反向代理 + systemd 服务 + uvicorn 监听 7860 端口 |
+| 线上地址 | `154.83.85.36` |
+
+普通演示不需要 GPU。V100 GPU 只在早期难度校正实验和部分训练脚本中用于加速，最终线上推理、文章估算和测验生成均可由 CPU 完成。运行服务时，前端静态文件由 FastAPI 挂载，浏览器访问 nginx 80 端口后转发到本机 uvicorn 服务。
 
 ## 四、总体设计
 
 ### 4.1 系统架构
 
-系统按数据层、模型层、API 层和前端层分层组织：
+系统按数据层、模型层、API 层、前端层和部署层组织。
 
 ```text
-[用户浏览器] → nginx (154.9.242.48) → systemd: vocab-estimator
-    → uvicorn FastAPI (localhost:7860)
-      ├── /api/vocabulary/quiz-v2        (分层Rasch测试)
-      ├── /api/vocabulary/quiz-v2/estimate (MLE估算)
-      ├── /api/v2/estimate/article       (文章估算)
-      └── /api/tests/save               (保存记录)
+用户浏览器
+  ↓
+nginx (154.83.85.36:80)
+  ↓
+systemd: vocab-estimator
+  ↓
+uvicorn FastAPI (localhost:7860)
+  ├── GET  /api/vocabulary/quiz-v2
+  ├── POST /api/vocabulary/quiz-v2/stream
+  ├── POST /api/vocabulary/quiz-v2/estimate
+  ├── POST /api/vocabulary/quiz-v2-stage2
+  ├── POST /api/v2/estimate/article
+  ├── POST /api/tests/save
+  └── GET  /api/tests/records
 ```
+
+数据层以 JSON 词库和 SQLite 数据库为核心。词库 JSON 保存 `word_to_stage`，每个词条包含 `difficulty`、`cluster_20`、`cluster_100`、`first_stage`、`all_stages`、`sources`、`translation` 等字段。SQLite 保存学生和历史测试记录。模型层使用 `StratifiedQuiz` 负责测验采样、Rasch 拟合和词汇量估计，使用 `article_estimator` 负责文章分析。API 层负责参数校验、版本选择、响应格式统一。前端层负责测试流程、文章输入、结果展示和词库版本选择。
 
 ### 4.2 技术栈
 
-| 层 | 技术 |
-|----|------|
-| 后端框架 | Python FastAPI + uvicorn |
-| 前端 | 静态 HTML + JS + CSS |
-| 数据持久化 | SQLite |
-| 词频数据 | wordfreq + 自建 vocab_bank |
-| 词形还原 | spaCy en_core_web_sm + 规则 fallback |
-| 机器翻译 | 自建英中字典 22,887 条 |
-| 参数训练 | PyTorch / NumPy (V100) |
-| 部署 | nginx + systemd |
+| 层 | 技术与文件 |
+| --- | --- |
+| 后端服务 | FastAPI、uvicorn，入口 `server/main.py` |
+| 模型核心 | `vocab_estimator/stratified_quiz.py`、`vocab_estimator/article_estimator.py` |
+| 数据配置 | `vocab_estimator/config.py`、`data/stage_vocab*.json` |
+| 前端 | `web/index.html`、`web/app.js`、`web/styles.css` |
+| 数据库 | SQLite，封装于 `server/database.py` |
+| 实验脚本 | `tests/simulation_eval.py`、`scripts/*.py` |
+| 部署 | nginx、systemd、uvicorn、生产环境变量 |
+
+技术选型偏轻量。FastAPI 适合快速构建可验证 API；原生前端减少构建依赖，便于课程设计演示和服务器部署；JSON 词库便于查看、对比和版本控制；SQLite 足够支撑学生记录、演示数据和本地实验。
 
 ### 4.3 模型演进
 
-**V1（退役）**：2 参数 Logistic 回归 + 分桶矩阵参数模型，使用 21,738 词族和 9 个频段桶。公式为 P(known|bucket_b) = sigmoid(θ_b + γ_u)，vocab_size = Σ bucket_size_b × sigmoid(θ_b + γ_u)。问题：低词汇量用户严重高估 ~4000 词，桶间硬边界划分不够平滑。
+项目经历了四个主要阶段。
 
-**V2（当前）**：Rasch 1PL IRT 模型，使用 11,418 词的 difficulty 标注和 20 个 cluster_20 类。公式为 P(word_j known | θ) = σ(θ - d_j)，d_j = logit(difficulty_j)。用户参数 θ 通过 Newton-Raphson MLE 拟合，置信区间基于 Fisher 信息量。模拟评估 MAE=363，R²=0.977。
+**V1 原始模型与词库**：最初使用 `stage_vocab.json` 的 11,418 个词作为测验和文章估算基础。难度分数由教育阶段和词频 rank 融合得到，词汇量估算中使用 `raw_sum * 0.8` 加旧 tanh + piecewise 校准。V1 在模拟实验中表现稳定，基准评估 MAE=363、R²=0.977，但文章估算面对学术、科技、环境类语料时覆盖率不足，C 类高难文本中 `algorithmic`、`blockchain`、`governance`、`mitigation` 等关键难词缺失。
+
+**enhanced 扩展词库**：为解决开放域覆盖不足，项目从 COCA20000、TOEFL、GRE 和人工现代领域白名单中新增 8,383 个词，词库从 11,418 扩展到 19,801。扩展后 COCA20000 覆盖率从 55.51% 提升到 98.48%，TOEFL 覆盖率从 69.97% 提升到 99.97%，GRE 覆盖率从 38.96% 提升到 72.15%。该版本显著提升文章估算覆盖率，但其新增词使用 boost 难度，适合作为过渡版本，不作为最终统一量表。
+
+**v2 统一标定词库**：`redesign_difficulty.py` 对 enhanced 词库重新计算 difficulty。算法综合 wordfreq rank、COCA rank、考试词表来源和阶段优先级，用统一公式消除简单 boost 带来的不连续。v2 在四篇长文上的估算结果为 C=3,368、F=2,457、P=1,084、K=519，保持 C > F > P > K 的预期顺序，同时避免 enhanced 版本对部分高难词的过度抬升。
+
+**v2_clusterv1 固定聚类词库**：扩展词库直接重排 cluster 会影响测验题池和历史对比，因此项目使用 `apply_v1_clustering.py` 将 v1 的 difficulty 固定边界应用到 v2 词库。结果显示，原有词中约 73.6% 保持 `cluster_20` 不变，`cluster_100` 保持率约 68.7%。该版本兼顾了 v2 的词库规模和 v1 的出题稳定性，目前后端把前端的 `v2` 选项映射到 `stage_vocab_v2_clusterv1.json`。
 
 ## 五、算法设计
 
-### 5.1 Rasch 模型（IRT 1PL）
+### 5.1 Rasch 模型
 
-核心模型为单参数逻辑斯蒂模型：
+系统核心采用 Rasch 1PL 项目反应理论模型。每个词 `j` 有难度参数 `d_j`，每个用户有能力参数 `θ`：
 
-```
-P(word_j known | θ) = σ(θ - d_j),  σ(x) = 1/(1 + exp(-x))
-d_j = logit(difficulty_j) = ln(difficulty_j / (1 - difficulty_j))
-```
-
-N(0,2) 先验防极端。Newton-Raphson 迭代求解 θ：
-
-```
-θ_{t+1} = θ_t + (Σ(y_j - σ(θ_t - d_j))) / (Σσ(θ_t - d_j)(1 - σ(θ_t - d_j)))
+```text
+P(word_j known | θ) = σ(θ - d_j)
+σ(x) = 1 / (1 + exp(-x))
+d_j = logit(difficulty_j)
 ```
 
-词汇量估计：vocab_size = Σ_j σ(θ - logit(difficulty_j)) × 0.8
+用户答题记录为 `{(word_j, y_j)}`，其中 `y_j=1` 表示认识或答对，`y_j=0` 表示不认识或答错。系统最大化对数似然：
 
-置信区间：SE(θ) = 1 / √Σσ(θ-d_j)(1-σ(θ-d_j))，95% CI = θ ± 1.96 × SE(θ)
-
-### 5.2 分层采样（StratifiedQuiz）
-
-Phase 1：40 题，20 个 cluster_20 类 × 2 题。5 个 diagnostic spread 类（c20: 0,5,10,15,19）用 extremes 策略（最易+最难），其余 15 类用 balanced 策略（中间难度）。
-
-Phase 2：低置信类（答对 1/2 题）追加 8 题/类，选 Fisher 信息量最大的词（|θ - d_j| 最小），平均追加 ~44 题。
-
-### 5.3 文章词汇量估算
-
-输入英文文章，分词（正则）+ 去停用词（541 个）+ lemma 归一化（规则型 + 60+ 不规则词）→ 匹配 stage_vocab → 计算 difficulty 分布 → 累计百分位估算：
-
+```text
+LL(θ) = Σ [y_j log σ(θ-d_j) + (1-y_j) log(1-σ(θ-d_j))]
 ```
-estimated_vocab = count(stage_vocab.difficulty ≤ article_median_difficulty)
+
+实现中加入 `N(0,2)` 先验，避免全对或全错时 θ 发散。求解使用多起点 Newton-Raphson / MAP 迭代，梯度和 Hessian 为：
+
+```text
+g = Σ(σ(θ-d_j)-y_j) + θ / 2
+h = Σσ(θ-d_j)(1-σ(θ-d_j)) + 1 / 2
 ```
+
+拟合得到 θ 后，词汇量估计不是硬阈值计数，而是对所有词求认识概率之和：
+
+```text
+raw_vocab = Σ_j σ(θ - logit(difficulty_j))
+```
+
+v1 为保持旧量表使用 `raw_vocab * 0.8` 和原有 tanh/piecewise 校准；v2 校准参数搜索显示直接 raw sum 已经最好，因此 v2 使用 scale=1.0，不再沿用 v1 的 0.8 压缩和旧式强校准。
+
+### 5.2 分层采样
+
+词库按 `cluster_20` 划分为 20 个难度类。生产代码当前默认 Phase 1 为 30 题：先按固定 streaming 顺序覆盖 20 个 cluster 各 1 题，再从中间难度类补充 10 题；旧实验中也保留 40 题路径，即 20 类各 2 题。这样设计的原因是词库 difficulty 右偏明显，若只从单一中位区间抽题，低水平或高水平用户的信息量都会不足。
+
+题目选择策略包括：
+
+1. **balanced**：在某个 cluster 内按 difficulty 分段抽取，使同一类内部也有一定覆盖。
+2. **extremes**：旧设计中用于诊断类，取类内最易和最难词，快速扩大 θ 定位范围。
+3. **informative**：在 Phase 2 或 CAT 思路中选择 `|θ-d_j|` 最小的词，此时 Fisher 信息量最大。
+
+Phase 2 接口仍保留，用于对低置信类别追加问题；但题量实验显示，完整 Phase 2 平均追加约 43.4 题，对精度提升有限，当前配置 `enable_phase2=False`，演示流程更偏向 30 题 streaming 快速估计。
+
+### 5.3 文章估算
+
+文章估算入口为 `/api/v2/estimate/article`。处理流程如下：
+
+1. 用正则 `[a-z]+(?:-[a-z]+)*` 抽取英文 token，保留连字符词。
+2. 转小写并去除 541 个停用词。
+3. 使用内联规则 lemma 生成候选，例如复数、过去式、进行式、常见不规则变化。
+4. 在当前选择的 stage vocabulary 中匹配词条。
+5. 对命中词的 difficulty 计算 p25、median、p75、mean、max 和 cluster 分布。
+6. 以文章 difficulty 中位数在全词库 difficulty 分布中的累计位置作为估计词汇量。
+
+公式为：
+
+```text
+estimated_vocab = count(vocab.difficulty <= article_median_difficulty)
+```
+
+该方法的优点是稳定、可解释，不依赖训练数据；缺点是中位数对高难长尾不敏感，未命中词不参与难度统计。最新优化先从词库覆盖率入手，把 C 类高难文章中的大量学术词、技术词和现代领域词纳入词库，使估算基础更可靠。后续可在 v2 上继续实验 p75/p90 尾部加权公式。
 
 ### 5.4 难度评分
 
-```
+原始难度评分综合教育阶段和词频 rank：
+
+```text
 difficulty = 0.60 × norm_stage + 0.40 × norm_rank
-norm_stage = (priority - 1) / 10,  norm_rank = log(rank + 1) / log(30001)
+norm_stage = (priority - 1) / 10
+norm_rank  = log(rank + 1) / log(30001)
 ```
 
-教育阶段权重 0.60 确保跨阶段区分度，词频 rank 权重 0.40 保证同阶段内区分度（spread ~0.37）。
+教育阶段代表中国学习者课程路径，词频 rank 代表开放语料中的常见程度。0.60/0.40 的权重让跨阶段顺序保持清晰，同时在同一阶段内仍保留约 0.37 的难度展开。对缺失 wordfreq rank 的词，系统用对应阶段的 rank 中位数补齐；对新增词，v2 进一步使用 COCA rank、TOEFL/GRE 来源和现代领域标签统一反推 priority 与 rank。
+
+v2 的难度重设计结论是：扩展词不应简单“加 boost”，否则会把部分常见但新近的技术词推得过高。统一标定后的 v2 更适合文章估算，而固定聚类后的 v2_clusterv1 更适合测验迁移。
 
 ## 六、验证方法
 
-### 6.1 合成用户模拟评估
+### 6.1 合成用户模拟
 
-tests/simulation_eval.py 生成 2000 个虚拟用户（true vocab ∈ [1000, 15000]），二分搜索反推真 θ，P(known) = σ(true_θ - d_j) 生成回答，执行完整 Phase 1+2 测试流程后评估指标。
+主模拟脚本为 `tests/simulation_eval.py`。实验生成 2,000 个虚拟用户，真实词汇量均匀分布在 1,000 到 15,000 之间。对每个用户，先用二分搜索反推真实 θ，使：
 
-### 6.2 主要实验结果
+```text
+Σ_j σ(true_θ - d_j) ≈ true_vocab
+```
 
-| 实验配置 | MAE | R² | 题量 |
-|---------|:---:|:--:|:----:|
-| Phase 1 only (40题) | 596 | 0.940 | 40 |
-| Phase 1+2 (~84题) | **363** | **0.977** | ~84 |
-| Hybrid bisection+CAT (40题) | 443 | 0.961 | 40 |
-| 25题初估 | 819 | 0.891 | 25 |
-| 30题最优折中 | 701 | 0.917 | 30 |
+然后根据 `P(known)=σ(true_θ-d_j)` 随机生成每道题的作答，执行完整测验流程，比较系统估计值与真实词汇量。该方法能在没有真实用户大样本的情况下验证算法是否自洽，也能用于比较题量、采样策略、词库版本和校准参数。
 
-主模拟评估：MAE=363，RMSE=455，R²=0.977，相关系数=0.989，平均偏差=-134。
+### 6.2 实验结果
 
-题量消融（300 用户，streaming 顺序）：10 题 MAE=1317, R²=0.720；15 题 MAE=1081, R²=0.813；20 题 MAE=928, R²=0.863；25 题 MAE=819, R²=0.891；30 题 MAE=701, R²=0.917；35 题 MAE=649, R²=0.929；40 题 MAE=596, R²=0.940。30 题后边际收益骤降。
+主要实验结果如下。
+
+| 实验配置 | 用户数 | MAE | RMSE | R² | 题量 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Phase 1 only | 300 | 596 | 729 | 0.940 | 40 |
+| Phase 1 + Phase 2 | 2,000 | 363 | 455 | 0.977 | 约 84 |
+| Hybrid bisection + CAT | 500 | 443 | - | 0.961 | 40 |
+| 25 题初估 | 300 | 819 | 981 | 0.891 | 25 |
+| 30 题折中 | 300 | 701 | 855 | 0.917 | 30 |
+
+主基准实验的相关系数为 0.989，平均偏差为 -134。整体看，Rasch 模型比早期硬集合或桶比例法稳定得多；Phase 2 虽可把 MAE 从 596 降到 363，但题量增加较大，因此前端默认采用较轻的 streaming 流程，保留继续细化能力。
 
 ### 6.3 分桶精度
 
-| 词汇量区间 | 用户数 | MAE | R² | 偏差 |
-|:---------:|:-----:|:---:|:--:|:----:|
-| 低 (1k-3k) | 369 | 334 | 0.447 | +2 |
-| 中 (3k-8k) | 965 | 374 | 0.896 | -91 |
-| 高 (8k-15k) | 666 | 363 | 0.796 | -271 |
+2,000 用户完整流程的分桶误差如下。
 
-### 6.4 算法稳定性测试（批处理验证）
+| 词汇量区间 | 用户数 | MAE | R² | 平均偏差 |
+| --- | ---: | ---: | ---: | ---: |
+| 低段 1k-3k | 369 | 334 | 0.447 | +2 |
+| 中段 3k-8k | 965 | 374 | 0.896 | -91 |
+| 高段 8k-15k | 666 | 363 | 0.796 | -271 |
 
-为评估估算算法的稳定性，设计了基于随机抽样的后台批处理验证方法：
+低段 MAE 不高但 R² 较低，说明低词汇量区间本身范围窄，少量题目噪声就会影响解释方差；中段表现最好，符合系统主要目标用户；高段存在轻微低估，原因是高难词密集且原 v1 词库尾部覆盖不足。v2 扩展词库正是为改善高段和文章估算中的尾部信息而引入。
 
-1. 从词库中选取一个公认词汇列表 A（例如 COCA20000 词表，该词表在本算法设计中未使用过）
-2. 对列表 A 进行多次随机采样，生成不同长度（200/300/400 词）和不同认识比例（10%/20%/30% 认识）的测试样本
-3. 共 3×3=9 种组合，每种组合重复测试 100 次，统计估算结果的平均值和方差
-4. 分析：(1)相同比例下不同长度的结果是否一致；(2)相同长度下不同比例是否呈线性关系；(3)方差是否随样本量增大而减小
+### 6.4 算法稳定性
 
-此方法可有效评估算法在已知词表上的系统偏差和随机误差，为置信区间的设定提供实证依据。本系统的 StreamQuiz API 天然支持这类批处理测试，可直接通过 /api/vocabulary/quiz-v2/estimate 批量处理。
+题量消融显示，10 题时 MAE=1,317、R²=0.720；20 题时 MAE=928、R²=0.863；30 题时 MAE=701、R²=0.917；40 题时 MAE=596、R²=0.940。30 题之后边际收益明显下降，35 到 40 题只带来约 53 的 MAE 改善。
 
-### 6.5 与行业产品 testyourvocab.com 的对比验证
+v2 校准参数搜索使用 `outputs/simulation_v2_clusterv1.json` 中 2,000 条记录进行对比。结果显示：
 
-设计对比验证方案（作为后续验证构想）：
+| 方法 | MAE | RMSE | 偏差 | R² | 结论 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| v2 raw sum identity | 725.221 | 918.763 | -178.221 | 0.947932 | 基准且已较好 |
+| 当前旧 point_estimate | 1814.489 | 2131.239 | -1701.151 | 0.719828 | v1 校准不适合 v2 |
+| OLS 线性 raw sum | 712.379 | 895.953 | 0.000 | 0.950486 | 小幅改善但需真实数据验证 |
+| 最优搜索 offset | 691.210 | 879.515 | -28.715 | 0.952286 | 提升有限且可能过拟合 |
 
-1. **批量数据获取**：通过浏览器自动化模拟用户操作 testyourvocab.com，每次获取认识的词列表 R_i、不认识的词列表 U_i、网站估计值 C_i，模拟 100 次得到 {(R_i, U_i, C_i)}
-2. **本算法估计**：对同组 {(R_i, U_i)} 运行本系统估算算法，输出 D_i
-3. **对比分析**：比较 {D_i} 和 {C_i} 的 MAE、相关系数、误差分布
+因此保守结论是：v2 直接使用 raw sum，不再套用 v1 风格 `0.8 -> tanh -> piecewise` 校准。该结论已反映到代码中：v1 scale=0.8，v2 scale=1.0。
+
+v2 置信区间也经过优化。旧 v2 CI 跨度过大，区间宽度与点估计的 ratio 一度超过 95%，甚至在部分场景接近 134%。最终将 v2 的 θ 区间系数设为 z=0.5，并将 v2 置信度阈值设为 high=0.25、mid=0.50，使 CI ratio 降至约 28.5%；v1 的 95% 区间逻辑保持不变。
+
+### 6.5 testyourvocab 对比
+
+系统设计了与 testyourvocab.com 的对比验证方案：通过浏览器自动化模拟多名用户，记录该网站返回的认识词列表、不认识词列表和估计值；再把同一组作答输入本系统，比较 MAE、相关系数和误差分布。该方案尚未作为正式实验完成，但已列入后续真实验证路径。当前报告中的核心数值来自可复现的合成用户模拟和固定 C/F/P/K 语料。
 
 ## 七、演示测试
 
-### 7.1 GUI 演示测试
+### 7.1 GUI 演示
 
-Web 界面支持：(1)选择题模式（四选一中文释义，含 ~30% 陷阱题）；(2)Binary 模式（认识/不认识，当翻译不可用时自动降级）；(3)文章估算模式（输入文章全文）。功能包括键盘快捷键、进度展示、汇总页、回退修改和 Stage 2 细化。结果页展示词汇量估算值、教育阶段映射、置信区间。
+Web 界面第一屏提供学生姓名输入、词库版本选择和“开始测试/文章估算/历史记录”入口。词库版本下拉框包含：
 
-### 7.2 后台批处理测试
+```text
+原始词库 (v1, 11,418词)
+扩展词库 (v2, 19,801词)
+```
 
-tests/simulation_eval.py 自动生成合成用户、执行完整测试流程、汇总评估指标。scripts/explore_question_count.py 探索最优题量。scripts/validate_hybrid_bisection.py 对比混合方案。结果保存到 outputs/ 目录。
+开始测试后，前端请求 `/api/vocabulary/quiz-v2?vocab_version=...` 获取题目。每题展示英文单词、中文释义选项和“没有正确答案”陷阱选项。用户完成测试后，前端将 responses 和 `vocab_version` 提交到 `/api/vocabulary/quiz-v2/estimate`，结果页展示估计词汇量、等级、置信区间、置信度和词库版本。文章估算页面则向 `/api/v2/estimate/article` 提交文章全文和词库版本，返回估计词汇量、文章难度、覆盖率和统计信息。
 
-### 7.3 实际估计：测试语料词汇量估计
+### 7.2 后台批处理
 
-对四类学员文档（C.txt > F.txt > P.txt > K.txt）使用文章估算接口得到结果：
+后台批处理主要用于验证算法稳定性和复现实验数据：
 
-| 文档 | 估算词汇量 | 教育阶段 | difficulty 中位数 | Token覆盖率 | Unique覆盖率 | 内容词 | 唯一词 |
-|:---:|:---------:|:--------:|:---------------:|:----------:|:------------:|:-----:|:-----:|
-| **C.txt** | **2,663** | **高中** | 0.7363 | 86.4% | 85.0% | 508 | 399 |
-| **F.txt** | **2,160** | **高中** | 0.7057 | 89.8% | 89.7% | 402 | 329 |
-| **P.txt** | **1,028** | **七年级** | 0.5452 | 83.1% | 85.1% | 402 | 248 |
-| **K.txt** | **506** | **小学五年级** | 0.4162 | 91.9% | 95.3% | 148 | 107 |
+| 脚本 | 作用 |
+| --- | --- |
+| `tests/simulation_eval.py` | 生成合成用户并运行主模拟评估 |
+| `scripts/explore_question_count.py` | 比较 10/15/20/25/30/35/40 题的精度 |
+| `scripts/validate_hybrid_bisection.py` | 比较二分搜索 + CAT 与分层采样 |
+| `scripts/expand_vocab.py` | 生成扩展词库与词库扩展报告 |
+| `scripts/redesign_difficulty.py` | 重新统一标定 v2 difficulty |
+| `scripts/apply_v1_clustering.py` | 将 v1 固定 difficulty 边界应用到 v2 |
+| `scripts/compare_vocabs.py` | 比较不同词库的分布、迁移风险和 θ raw sum |
+| `scripts/calibrate_v2.py` | 搜索 v2_clusterv1 校准参数 |
 
-**分析**：
-- 排序完全一致：C(2663) > F(2160) > P(1028) > K(506)
-- 内容覆盖合理：C 为学术文本（AI伦理、气候变化），F 为通用内容（体育、好莱坞），P 为故事阅读，K 为基础英语
-- C.txt 未匹配词含 AI-driven, algorithmic, blockchain 等专业词（13.6% 未覆盖），说明词库需扩展
-- K.txt 覆盖率最高（95.3%），基础词基本全覆盖
-- 建议确信度区间：C ±400、F ±400、P ±350、K ±300
+这些脚本保证课程设计报告中的主要数据不是手工估计，而是可以从项目文件和输出报告中复现。
+
+### 7.3 实际估计 C/F/P/K
+
+项目使用四篇固定测试语料 C、F、P、K 验证文章估算。C 为更高难度的学术/技术/社会议题文本，F 为中高难度通用内容，P 为故事阅读，K 为基础文本。v1 原始词库结果如下：
+
+| 文档 | 估算词汇量 | 等级 | difficulty 中位数 | Token 覆盖率 | Unique 覆盖率 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| C | 2,663 | 高中 | 0.7363 | 86.42% | 84.96% |
+| F | 2,160 | 高中 | 0.7057 | 89.80% | 89.67% |
+| P | 1,028 | 七年级 | 0.5452 | 83.08% | 85.08% |
+| K | 506 | 小学五年级 | 0.4162 | 91.89% | 95.33% |
+
+v2 统一标定词库结果如下：
+
+| 文档 | 估算词汇量 | 等级 | difficulty 中位数 | Token 覆盖率 | Unique 覆盖率 | 内容词 | 唯一词 |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| C | 3,368 | 高中 | 0.7395 | 93.70% | 92.98% | 508 | 399 |
+| F | 2,457 | 高中 | 0.7105 | 94.03% | 94.85% | 402 | 330 |
+| P | 1,084 | 八年级 | 0.5508 | 86.82% | 89.52% | 402 | 248 |
+| K | 519 | 小学六年级 | 0.4178 | 93.24% | 97.20% | 148 | 107 |
+
+扩展后 C 类语料的 token 覆盖率从 86.4% 提升到 93.7%，F 类达到 94.0%；按本次优化目标口径，开放域文章覆盖率已从约 86.4% 提升到约 94.3% 附近。更重要的是，C 文本中原先缺失的 `algorithmic`、`blockchain`、`governance`、`mitigation`、`biodiversity` 等高难信号词进入词库后，C 的估算值从 2,663 提升到 3,368，显著拉开与 F/P/K 的差距。排序仍满足 C > F > P > K，说明扩展词库没有破坏原本的相对判断。
 
 ## 八、完成情况
 
-已实现基本功能：词汇量选择测试（Rasch MLE + Fisher 置信区间）、文章词汇量估算、两阶段自适应测试、后台批处理测试。
+课程设计要求的主体功能已完成：词汇量测验、Rasch 模型估计、文章估算、置信区间、前端交互、后台模拟测试、文档整理和线上部署均可运行。相较初版，最新完成情况如下。
 
-额外实现功能：群组对比 (PAVA)、Streaming 渐进式细化、考试词表锚点校准、参数训练管线。
+1. **词库建设完成四版本并存**：v1、enhanced、v2、v2_clusterv1 均已保存，既能保证生产回退，也能支持文章估算和测验迁移实验。
+2. **文章估算完成实质优化**：通过扩展 COCA/TOEFL/GRE/现代领域词，C/F/P/K 语料覆盖率与估算合理性明显提升，v2 输出 C=3,368、F=2,457、P=1,084、K=519。
+3. **前后端版本选择完成**：前端下拉框和后端 `vocab_version` 参数已打通，v1/v2 可在测验和文章估算中切换。
+4. **v2 校准完成搜索**：实验表明 v2 raw sum 已经接近最优，旧 v1 校准会严重低估，因此 v2 使用直接 raw sum。
+5. **v2 CI 完成优化**：将 v2 θ 区间 z 值收紧到 0.5，CI ratio 从过宽水平降到约 28.5%，结果展示更符合用户直觉。
+6. **部署完成**：服务部署到 `154.83.85.36`，采用 nginx + uvicorn + systemd，并在 production 模式下运行。
+7. **工程可读性提升**：全项目注释中文化，便于课程验收和后续维护。
+8. **脚本可复现**：新增 `expand_vocab.py`、`redesign_difficulty.py`、`apply_v1_clustering.py`、`compare_vocabs.py`、`calibrate_v2.py`，关键数据均可追溯。
 
-**自评主要亮点**：
-1. 基于 IRT 的严谨统计基础（Rasch 1PL），可解释性强
-2. 合成数据模拟验证 MAE=363、R²=0.977，接近理论下界
-3. 完整工程闭环：从数据收集到部署上线
-4. 实际语料估计结果 C > F > P > K 排序完全一致
+项目亮点包括：统计模型基础较严谨，Rasch 1PL 可解释；合成实验效果较好，完整流程 MAE=363、R²=0.977；文章估算从单一课堂词表扩展到开放域词表；前后端与部署形成完整工程闭环；文档体系较完整，便于答辩展示。
 
-**自评主要缺陷**：
-1. 缺乏真实用户交叉验证（需对接 CET-4/6 成绩）
-2. stage_vocab 11,418 词偏少，高阶用户分辨率不足
-3. Phase 2 细化提升有限（追加 44 题几乎不增加精度）
-4. 难度标注基于经验公式，未经答题数据校准
+项目不足也比较明确：第一，缺少真实学生 CET-4/6 或标准化考试成绩的交叉验证；第二，v2 选择题测验虽然已支持切换，但仍需要更多真实答题数据验证其对用户体验和估算量表的影响；第三，文章估算仍使用 difficulty 中位数，未来应验证 p75/p90 或 tail 加权公式；第四，专有名词、缩写和连字符复合词的处理仍有改进空间。
 
 ## 九、小组分工
 
-单人完成 100%。本人负责：需求分析、词库构建、难度评分设计、Rasch 模型实现、分层采样设计、FastAPI 后端开发、Web 前端交互、SQLite 数据库设计、合成数据模拟评估、测试语料实际估算、nginx 部署上线、文档撰写。
+本课程设计为单人完成，完成比例 100%。本人负责需求分析、词库构建、难度评分设计、Rasch 模型实现、分层采样设计、文章估算模块、FastAPI 后端、Web 前端、SQLite 记录保存、合成用户模拟、词库扩展、v2 校准搜索、服务器部署、文档整理和课程设计报告撰写。
+
+如果按软件工程角色拆分，可对应为：产品与需求分析 10%，数据工程 20%，算法设计与实验 30%，前后端工程 25%，部署运维与文档 15%。虽然实际由单人完成，但项目文件结构、模块边界和文档组织仍按多人协作项目的方式整理。
 
 ## 十、参考文献
 
-1. Rasch, G. (1960). Probabilistic Models for Some Intelligence and Attainment Tests.
-2. Lord, F. M. (1980). Applications of Item Response Theory to Practical Testing Problems.
-3. Baker, F. B., & Kim, S.-H. (2004). Item Response Theory (2nd ed.). CRC Press.
-4. testyourvocab.com - English Vocabulary Size Test.
-5. wordfreq - A database of word frequencies in natural language (Speer & Chin).
-6. 义务教育英语课程标准 (2022), 中华人民共和国教育部.
-7. 全国大学英语四、六级考试大纲 (2016).
-8. 项目内部文档：docs/TECHNICAL.md, docs/experimental_summary.md, docs/project_review.md.
+1. Rasch, G. (1960). *Probabilistic Models for Some Intelligence and Attainment Tests*.
+2. Lord, F. M. (1980). *Applications of Item Response Theory to Practical Testing Problems*.
+3. Baker, F. B., & Kim, S.-H. (2004). *Item Response Theory: Parameter Estimation Techniques*.
+4. Nation, I. S. P. (2006). How large a vocabulary is needed for reading and listening?
+5. Goulden, R., Nation, P., & Read, J. (1990). How large can a receptive vocabulary be?
+6. Milton, J. (2009). *Measuring Second Language Vocabulary Acquisition*.
+7. wordfreq: A database of word frequencies in natural language.
+8. COCA word frequency list, TOEFL vocabulary list, GRE vocabulary list.
+9. testyourvocab.com, English Vocabulary Size Test.
+10. 义务教育英语课程标准（2022），中华人民共和国教育部。
+11. 全国大学英语四、六级考试大纲。
+12. 项目内部文档：`docs/TECHNICAL.md`、`docs/experimental_summary.md`、`docs/article_estimation_optimization.md`、`outputs/vocab_expansion_report.md`、`outputs/calibration_gpt55_search.md`、`docs/project_review.md`。
