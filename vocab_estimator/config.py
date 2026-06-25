@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 class EstimatorConfig:
     """Runtime configuration for vocabulary bank construction and estimation."""
 
-    random_seed: int = 42
+    random_seed: int = 0  # 0 = use system entropy, non-zero = fixed for reproducibility
     vocab_size: int = 30_000
     min_vocab_size: int = 20_000
 
@@ -65,12 +65,14 @@ class EstimatorConfig:
     # CET-6 threshold: ~6,000-7,000; TEM-8 threshold: ~10,000-13,000
     calibration_native_max: int = 20_000
     calibration_ceiling: int = 22_000
-    calibration_k: float = 0.00005  # tanh saturation rate (keep original, compress only via piecewise)
-    #   raw 2000 → cal 1994   (low-end unchanged)
-    #   raw 5000 → cal 4900
-    #   raw 10000 → cal 9240
-    #   raw 15000 → cal 12700
-    #   raw 21738 → cal 16000
+    calibration_k: float = 0.0000691  # tanh saturation rate
+    #   k=0.0000691: calibrated = max_v * tanh(k * raw), then piecewise
+    #   raw 21303 (all-correct) → cal 18049   (母语者水平)
+    #   raw 10000 → cal 10335   (专业/母语级)
+    #   raw 8000  → cal  7877   (六级+ / 考研)
+    #   raw 6000  → cal  5181   (四级)
+    #   raw 4000  → cal  4076   (高中/四级过渡)
+    #   raw 2000  → cal  2747   (初中/高中过渡)
 
     abbreviation_max_len: int = 5
     min_word_len: int = 2
@@ -97,23 +99,26 @@ class EstimatorConfig:
     # Effective only when enable_weighted_fitting is True.
 
     # --- Piecewise linear calibration (方案 B) ---
-    # Applies a segmented linear compression AFTER the raw logistic estimate:
-    #   [0, 4000]   → slope 1.00  (identity)
-    #   [4000, 8000] → slope 0.72
-    #   [8000, 15000] → slope 0.48
-    #   [15000, 22000] → slope 0.24
+    # Applied AFTER the tanh stage. Compresses the mid-range (3000-8000)
+    # by 55% to keep ~四级 students around 4000-5000, then expands
+    # the upper range by 28% so all-correct reaches ~18000.
+    # Segments:
+    #   [0, 3000]    → slope 1.00  (identity)
+    #   [3000, 8000]  → slope 0.45  (mid-range compression)
+    #   [8000, 22000] → slope 1.28  (high-end boost)
     enable_piecewise_calibration: bool = True
 
     # Each entry is (upper_boundary, slope_for_segment).
     # The first segment always starts at 0 with the first entry's slope.
     piecewise_knots: tuple[tuple[int, float], ...] = (
-        (3_500, 1.00),   # low-end unchaged
-        (6_500, 0.55),   # CET-4/6 compressed 45%
-        (12_000, 0.30),  # higher learners compressed 70%
-        (22_000, 0.15),  # max compressed 85%
+        (3_000, 1.00),
+        (8_000, 0.45),
+        (22_000, 1.28),
     )
 
     # Two-stage adaptive testing parameters
+    phase1_question_count: int = 30
+    enable_phase2: bool = False
     stage2_boundary_low: float = 0.20
     stage2_boundary_high: float = 0.80
     stage2_extra_per_bucket: int = 8

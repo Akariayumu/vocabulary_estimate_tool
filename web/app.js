@@ -1,24 +1,25 @@
 const state = {
-  questions: [],        // Current phase questions
-  allQuestions: [],     // Cumulative: Stage 1 + Stage 2 (for final submit)
+  questions: [],
   responses: new Map(),
   currentIndex: 0,
+  phase: "setup",        // setup | quiz_v2 | result | quiz_stage2
   locked: false,
-  advanceTimer: null,
   result: null,
   saved: false,
-  phase: 1,             // 1 = Stage 1, 2 = Stage 2
-  stage1QuestionCount: 0,
   stage2Questions: [],
-  stage2Loading: false,
-  boundaryBuckets: [],
-  stage1Complete: false,
+  stage2Responses: new Map(),
+  stage2Active: false,
+  summaryShown: false,   // true once summary has been displayed
+  preRefineResult: null, // snapshot taken before stage2 refinement
+  flashChoice: null,
+  advanceTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
 
 const views = {
   setup: $("setupView"),
+  article: $("articleView"),
   test: $("testView"),
   result: $("resultView"),
   records: $("recordsView"),
@@ -56,56 +57,99 @@ async function loadStats() {
   }
 }
 
-async function startTest() {
-  setMessage("正在生成测试词表");
-  const perBucket = Number($("perBucket").value || 4);
-  const data = await fetchQuiz(perBucket);
-  state.phase = 1;
-  state.questions = data.questions;
-  state.allQuestions = [...data.questions];
-  state.stage1QuestionCount = data.questions.length;
-  state.responses = new Map();
-  state.currentIndex = 0;
-  state.locked = false;
-  state.result = null;
-  state.saved = false;
-  state.stage1QuestionCount = 0;
-  state.stage2Questions = [];
-  state.stage2Loading = false;
-  state.boundaryBuckets = [];
-  state.stage1Complete = false;
-  clearAdvanceTimer();
-  $("saveStatus").textContent = "";
-  $("phaseIndicator").textContent = "第一阶段";
-  renderCard();
-  showView("test");
-  setMessage("");
-}
+// ============================================================
+// Phase 1 – Quiz v2 (60 MC questions)
+// ============================================================
 
-async function fetchQuiz(perBucket) {
-  return requestJson(`/api/vocabulary/quiz?per_bucket=${perBucket}&seed=${Date.now() % 100000}`);
-}
-
-function renderCard() {
-  const total = state.allQuestions.length;
-  const answered = state.responses.size;
-  const completed = total > 0 && answered === total;
-
-  // Stage 2 loading in progress
-  if (state.stage2Loading) {
-    $("pageTitle").textContent = "正在准备第二阶段测试...";
-    $("wordList").innerHTML = `<p class="status">正在根据第一阶段的回答生成针对性题目...</p>`;
-    $("progressText").textContent = "—";
-    $("progressBar").value = 50;
-    $("submitBtn").classList.add("hidden");
-    $("submitBtn").disabled = true;
-    return;
+async function startQuizV2() {
+  setMessage("正在生成测试题目");
+  try {
+    const data = await requestJson(`/api/vocabulary/quiz-v2?seed=${Date.now() % 100000}&balanced=true`);
+    state.questions = data.questions;
+    state.responses = new Map();
+    state.currentIndex = 0;
+    state.locked = false;
+    state.result = null;
+    state.saved = false;
+    state.stage2Questions = [];
+    state.stage2Responses = new Map();
+    state.stage2Active = false;
+    state.phase = "quiz_v2";
+    state.summaryShown = false;
+    state.preRefineResult = null;
+    $("saveStatus").textContent = "";
+    renderQuestion();
+    showView("test");
+    setMessage("");
+  } catch (err) {
+    setMessage(`加载题目失败: ${err.message}`);
   }
+}
 
-  $("progressText").textContent = `${answered}/${total}`;
-  $("progressBar").value = total ? (answered / total) * 100 : 0;
-  $("submitBtn").classList.toggle("hidden", !completed);
-  $("submitBtn").disabled = !completed;
+// ============================================================
+// Stage 2 – Phase 2 refinement
+// ============================================================
+
+async function startStage2() {
+  const btn = $("refineBtn");
+  btn.disabled = true;
+  btn.textContent = "加载中...";
+  setMessage("正在准备细化题目");
+
+  try {
+    const allResponses = buildResponseArray();
+    const data = await requestJson("/api/vocabulary/quiz-v2-stage2", {
+      method: "POST",
+      body: JSON.stringify({ responses: allResponses }),
+    });
+
+    if (!data.questions || data.questions.length === 0) {
+      setMessage("无需细化");
+      btn.disabled = false;
+      btn.textContent = "细化不确定的类";
+      return;
+    }
+
+    // Snapshot the current estimate before refinement
+    state.preRefineResult = state.result ? { ...state.result } : null;
+
+    const qCount = data.questions.length;
+    setMessage(`细化 ${qCount} 道不确定类别的题目`);
+
+    state.stage2Questions = data.questions;
+    state.stage2Responses = new Map();
+    state.stage2Active = true;
+    state.currentIndex = 0;
+    state.locked = false;
+    state.phase = "quiz_stage2";
+
+    renderQuestion();
+    showView("test");
+  } catch (err) {
+    setMessage(`细化加载失败: ${err.message}`);
+    btn.disabled = false;
+    btn.textContent = "细化不确定的类";
+  }
+}
+
+// ============================================================
+// Render current question
+// ============================================================
+
+function renderQuestion() {
+  const isStage2 = state.phase === "quiz_stage2";
+  const questions = isStage2 ? state.stage2Questions : state.questions;
+  const responses = isStage2 ? state.stage2Responses : state.responses;
+  const total = questions.length;
+
+  if (isStage2) {
+    $("phaseIndicator").textContent = "细化测试";
+    $("phaseIndicator").className = "phase-stage2";
+  } else {
+    $("phaseIndicator").textContent = "分层测试";
+    $("phaseIndicator").className = "phase-main";
+  }
+  renderProgress(questions, responses);
 
   if (!total) {
     $("pageTitle").textContent = "暂无题目";
@@ -113,38 +157,54 @@ function renderCard() {
     return;
   }
 
-  if (completed) {
-    const phase = state.phase === 1 ? "第一阶段" : "第二阶段";
-    $("pageTitle").textContent = `${phase}已完成 ${total}/${total} 题`;
-    $("wordList").innerHTML = `
-      <div class="quizComplete">
-        <strong>${phase}全部完成</strong>
-        <span>${state.phase === 1 ? "正在分析结果，准备第二阶段测试..." : "提交后会根据所有答对情况估算词汇量。"}</span>
-      </div>
-    `;
-    // Auto-trigger Stage 2 when Stage 1 completes
-    if (state.phase === 1 && !state.stage1Complete) {
-      state.stage1Complete = true;
-      triggerStage2();
-    }
-    return;
-  }
-
-  const current = Math.min(state.currentIndex, total - 1);
-  const question = state.questions[current];
-  const phaseLabel = state.phase === 2 ? "第二阶段" : "第一阶段";
-  $("pageTitle").textContent = `${phaseLabel}：第 ${current + 1}/${total} 题`;
+  const question = questions[state.currentIndex];
+  const prefix = isStage2 ? "细化测试" : "测试";
+  $("pageTitle").textContent = `${prefix}：第 ${state.currentIndex + 1}/${total} 题`;
 
   if (question.mode === "binary" || !Array.isArray(question.options) || question.options.length < 4) {
-    renderBinaryCard(question);
+    renderBinaryCard(question, isStage2);
     return;
   }
 
-  renderMultipleChoiceCard(question);
+  renderMCCard(question, isStage2);
 }
 
-function renderMultipleChoiceCard(question) {
-  const response = state.responses.get(question.word);
+function renderProgress(questions, responses) {
+  const total = questions.length;
+  const current = total ? state.currentIndex + 1 : 0;
+  $("progressText").textContent = total ? `第 ${current}/${total} 题` : "第 0/0 题";
+  $("progressBar").value = current;
+  $("progressBar").max = total || 1;
+
+  let dots = $("questionDots");
+  if (!dots) {
+    dots = document.createElement("div");
+    dots.id = "questionDots";
+    dots.className = "questionDots";
+    $("progressBar").insertAdjacentElement("afterend", dots);
+  }
+
+  dots.innerHTML = "";
+  questions.forEach((question, index) => {
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.className = "questionDot";
+    if (responses.has(question.word)) dot.classList.add("answered");
+    if (index === state.currentIndex) dot.classList.add("current");
+    dot.setAttribute("aria-label", `第 ${index + 1} 题${responses.has(question.word) ? "，已答" : "，未答"}`);
+    dot.addEventListener("click", () => {
+      clearPendingAdvance();
+      state.currentIndex = index;
+      renderQuestion();
+    });
+    dots.appendChild(dot);
+  });
+}
+
+function renderMCCard(question, isStage2) {
+  const questions = isStage2 ? state.stage2Questions : state.questions;
+  const responses = isStage2 ? state.stage2Responses : state.responses;
+  const response = responses.get(question.word);
   const selected = response?.choice;
   const isAnswered = Boolean(response);
   const isTrap = question.answer === null;
@@ -153,7 +213,7 @@ function renderMultipleChoiceCard(question) {
   if (!isAnswered) {
     feedback = "选择正确中文释义";
   } else if (response.known) {
-    feedback = "回答正确";
+    feedback = "回答正确 ✅";
   } else if (isTrap) {
     feedback = "回答错误，该题无正确选项";
   } else {
@@ -168,16 +228,20 @@ function renderMultipleChoiceCard(question) {
       <div class="unknownRow"></div>
       <p class="feedback ${isAnswered ? (response.known ? "correctText" : "wrongText") : ""}">${escapeHtml(feedback)}</p>
     </article>
+    <div class="quizNav">
+      <button id="prevBtn" class="ghost" type="button">← 上一题</button>
+      <button id="nextBtn" class="primary" type="button">下一题 →</button>
+    </div>
   `;
 
   const grid = $("wordList").querySelector(".optionGrid");
-  question.options.forEach((option, index) => {
+  question.options.forEach((option, i) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = optionClass(index, selected, question.answer, isAnswered);
-    button.disabled = state.locked;
-    button.innerHTML = `<span>${index + 1}</span>${escapeHtml(option)}`;
-    button.addEventListener("click", () => chooseOption(index));
+    button.className = optionClass(i, selected, question.answer, isAnswered);
+    if (isFlashChoice(question.word, i)) button.classList.add("answerFlash");
+    button.innerHTML = `<span>${i + 1}</span>${escapeHtml(option)}`;
+    button.addEventListener("click", () => chooseOption(i, isStage2));
     grid.appendChild(button);
   });
 
@@ -190,9 +254,9 @@ function renderMultipleChoiceCard(question) {
       btn1Class += " selected wrong";
     }
     btn1.className = btn1Class;
-    btn1.disabled = state.locked;
+    if (isFlashChoice(question.word, 4)) btn1.classList.add("answerFlash");
     btn1.innerHTML = `<span>5</span>以上都不认识`;
-    btn1.addEventListener("click", () => chooseUnknownOption(4));
+    btn1.addEventListener("click", () => chooseUnknown(4, isStage2));
     unknownRow.appendChild(btn1);
 
     const btn2 = document.createElement("button");
@@ -202,31 +266,335 @@ function renderMultipleChoiceCard(question) {
       btn2Class += isTrap ? " selected correct" : " selected wrong";
     }
     btn2.className = btn2Class;
-    btn2.disabled = state.locked;
+    if (isFlashChoice(question.word, 5)) btn2.classList.add("answerFlash");
     btn2.innerHTML = `<span>6</span>没有正确答案`;
-    btn2.addEventListener("click", () => chooseUnknownOption(5));
+    btn2.addEventListener("click", () => chooseUnknown(5, isStage2));
     unknownRow.appendChild(btn2);
+  }
+
+  // Nav button visibility
+  const prevBtn = $("prevBtn");
+  const nextBtn = $("nextBtn");
+  const total = questions.length;
+  const atFirst = state.currentIndex === 0;
+  const atLast = state.currentIndex === total - 1;
+  const allAnswered = responses.size === total;
+  prevBtn.style.display = atFirst ? "none" : "";
+  if (atLast && allAnswered) {
+    nextBtn.textContent = "提交估算";
+    nextBtn.style.display = "";
+  } else if (atLast) {
+    nextBtn.style.display = "none";
+  } else {
+    nextBtn.textContent = "下一题 →";
+    nextBtn.style.display = "";
+  }
+  prevBtn.addEventListener("click", () => goPrev());
+  if (atLast && allAnswered) {
+    nextBtn.addEventListener("click", () => submitEstimate());
+  } else {
+    nextBtn.addEventListener("click", () => goNext());
   }
 }
 
-function renderBinaryCard(question) {
-  const response = state.responses.get(question.word);
+function renderBinaryCard(question, isStage2) {
+  const questions = isStage2 ? state.stage2Questions : state.questions;
+  const responses = isStage2 ? state.stage2Responses : state.responses;
+  const response = responses.get(question.word);
   const selected = response?.known;
   const isAnswered = Boolean(response);
+
   $("wordList").innerHTML = `
     <article class="quizCard">
       <div class="wordMeta">rank ${escapeHtml(question.rank)} · ${escapeHtml(question.bucket)}</div>
       <div class="quizWord">${escapeHtml(question.word)}</div>
-      <div class="binaryHint">该词暂无中文选项，请按原模式作答。</div>
+      <div class="binaryHint">该词暂无中文选项，请判断是否认识。</div>
       <div class="binaryGrid">
-        <button type="button" class="optionBtn binaryKnown ${isAnswered && selected === true ? "selected correct" : ""}" ${state.locked ? "disabled" : ""}><span>1</span>认识</button>
-        <button type="button" class="optionBtn binaryUnknown ${isAnswered && selected === false ? "selected wrong" : ""}" ${state.locked ? "disabled" : ""}><span>2</span>不认识</button>
+        <button type="button" class="optionBtn binaryKnown ${isAnswered && selected === true ? "selected correct" : ""}"><span>1</span>认识</button>
+        <button type="button" class="optionBtn binaryUnknown ${isAnswered && selected === false ? "selected wrong" : ""}"><span>2</span>不认识</button>
       </div>
       <p class="feedback">${isAnswered ? "已记录" : "选择你的判断"}</p>
     </article>
+    <div class="quizNav">
+      <button id="prevBtn" class="ghost" type="button">← 上一题</button>
+      <button id="nextBtn" class="primary" type="button">下一题 →</button>
+    </div>
   `;
-  $("wordList").querySelector(".binaryKnown").addEventListener("click", () => answerBinary(true));
-  $("wordList").querySelector(".binaryUnknown").addEventListener("click", () => answerBinary(false));
+  if (isFlashChoice(question.word, 0)) {
+    $("wordList").querySelector(".binaryKnown").classList.add("answerFlash");
+  }
+  if (isFlashChoice(question.word, 1)) {
+    $("wordList").querySelector(".binaryUnknown").classList.add("answerFlash");
+  }
+  $("wordList").querySelector(".binaryKnown").addEventListener("click", () => answerBinary(true, isStage2));
+  $("wordList").querySelector(".binaryUnknown").addEventListener("click", () => answerBinary(false, isStage2));
+
+  // Nav buttons
+  const prevBtn = $("prevBtn");
+  const nextBtn = $("nextBtn");
+  const total = questions.length;
+  const atFirst = state.currentIndex === 0;
+  const atLast = state.currentIndex === total - 1;
+  const allAnswered = responses.size === total;
+  prevBtn.style.display = atFirst ? "none" : "";
+  if (atLast && allAnswered) {
+    nextBtn.textContent = "提交估算";
+    nextBtn.style.display = "";
+  } else if (atLast) {
+    nextBtn.style.display = "none";
+  } else {
+    nextBtn.textContent = "下一题 →";
+    nextBtn.style.display = "";
+  }
+  prevBtn.addEventListener("click", () => goPrev());
+  if (atLast && allAnswered) {
+    nextBtn.textContent = "提交估算";
+    nextBtn.addEventListener("click", () => submitEstimate());
+  } else {
+    nextBtn.addEventListener("click", () => goNext());
+  }
+}
+
+// ============================================================
+// Answer handlers
+// ============================================================
+
+function chooseOption(index, isStage2) {
+  if (state.locked) return;
+  const questions = isStage2 ? state.stage2Questions : state.questions;
+  const responses = isStage2 ? state.stage2Responses : state.responses;
+  const question = questions[state.currentIndex];
+  if (!question || question.mode === "binary") return;
+  const known = index === question.answer;
+  responses.set(question.word, { word: question.word, known, choice: index });
+  flashAndMaybeAdvance(question.word, index, isStage2);
+}
+
+function chooseUnknown(index, isStage2) {
+  if (state.locked) return;
+  const questions = isStage2 ? state.stage2Questions : state.questions;
+  const responses = isStage2 ? state.stage2Responses : state.responses;
+  const question = questions[state.currentIndex];
+  if (!question || question.mode === "binary") return;
+  let known;
+  if (question.answer === null && index === 5) {
+    known = true;
+  } else {
+    known = false;
+  }
+  responses.set(question.word, { word: question.word, known, choice: index });
+  flashAndMaybeAdvance(question.word, index, isStage2);
+}
+
+function answerBinary(known, isStage2) {
+  if (state.locked) return;
+  const questions = isStage2 ? state.stage2Questions : state.questions;
+  const responses = isStage2 ? state.stage2Responses : state.responses;
+  const question = questions[state.currentIndex];
+  if (!question) return;
+  responses.set(question.word, { word: question.word, known, choice: known ? 0 : 1 });
+  flashAndMaybeAdvance(question.word, known ? 0 : 1, isStage2);
+}
+
+function isFlashChoice(word, choice) {
+  return state.flashChoice?.word === word && state.flashChoice?.choice === choice;
+}
+
+function clearPendingAdvance() {
+  if (state.advanceTimer) {
+    clearTimeout(state.advanceTimer);
+    state.advanceTimer = null;
+  }
+  state.locked = false;
+  state.flashChoice = null;
+}
+
+function flashAndMaybeAdvance(word, choice, isStage2) {
+  clearPendingAdvance();
+  state.locked = true;
+  state.flashChoice = { word, choice };
+  renderQuestion();
+
+  state.advanceTimer = setTimeout(() => {
+    state.advanceTimer = null;
+    state.locked = false;
+    state.flashChoice = null;
+
+    const questions = isStage2 ? state.stage2Questions : state.questions;
+    const atLast = state.currentIndex >= questions.length - 1;
+    if (!atLast) {
+      state.currentIndex += 1;
+    }
+    renderQuestion();
+  }, 300);
+}
+
+// ============================================================
+// Navigation
+// ============================================================
+
+function goPrev() {
+  clearPendingAdvance();
+  if (state.currentIndex <= 0) return;
+  state.currentIndex -= 1;
+  renderQuestion();
+}
+
+function goNext() {
+  clearPendingAdvance();
+  const isStage2 = state.phase === "quiz_stage2";
+  const questions = isStage2 ? state.stage2Questions : state.questions;
+  const responses = isStage2 ? state.stage2Responses : state.responses;
+  const atLast = state.currentIndex >= questions.length - 1;
+  if (atLast) {
+    if (responses.size === questions.length) {
+      submitEstimate();
+    }
+    return;
+  }
+  state.currentIndex += 1;
+  renderQuestion();
+}
+
+// ============================================================
+// Summary page (shown after all quiz questions are answered)
+// ============================================================
+
+function showSummary() {
+  state.summaryShown = true;
+  const responses = state.responses;
+  const questions = state.questions;
+  const total = questions.length;
+  const answered = responses.size;
+
+  let correct = 0;
+  let listHtml = "";
+  questions.forEach((q, i) => {
+    const resp = responses.get(q.word);
+    const isAnswered = Boolean(resp);
+    const isCorrect = isAnswered && resp.known === true;
+    if (isCorrect) correct++;
+    const statusIcon = isCorrect ? "✅" : (isAnswered ? "❌" : "⏳");
+    const statusClass = isCorrect ? "summary-correct" : (isAnswered ? "summary-wrong" : "summary-unanswered");
+    listHtml += `<div class="summary-item ${statusClass}"><span class="summary-idx">${i + 1}</span><span class="summary-word">${escapeHtml(q.word)}</span><span class="summary-status">${statusIcon}</span></div>`;
+  });
+
+  $("phaseIndicator").textContent = "测试完成";
+  $("phaseIndicator").className = "phase-main";
+  state.currentIndex = total ? total - 1 : 0;
+  renderProgress(questions, responses);
+  $("pageTitle").textContent = `答题汇总：答对 ${correct}/${total}`;
+
+  $("wordList").innerHTML = `
+    <div class="summaryContainer">
+      <div class="summary-header">
+        <div class="summary-score">得分：${correct} / ${total}</div>
+        <div class="summary-pct">${total > 0 ? Math.round(correct / total * 100) : 0}%</div>
+      </div>
+      <div class="summary-list">${listHtml}</div>
+      <div class="summary-actions">
+        <button id="submitFromSummaryBtn" class="primary" type="button">提交估算</button>
+        <button id="modifyFromSummaryBtn" class="ghost" type="button">修改答案</button>
+      </div>
+    </div>
+  `;
+
+  $("submitFromSummaryBtn").addEventListener("click", () => submitEstimate());
+  $("modifyFromSummaryBtn").addEventListener("click", () => {
+    state.currentIndex = 0;
+    renderQuestion();
+  });
+}
+
+// ============================================================
+// Submit estimate
+// ============================================================
+
+function buildResponseArray() {
+  const all = [];
+  state.responses.forEach((v) => all.push({ word: v.word, known: v.known === true }));
+  state.stage2Responses.forEach((v) => all.push({ word: v.word, known: v.known === true }));
+  return all;
+}
+
+async function submitEstimate() {
+  setMessage("正在估算词汇量");
+  const allResponses = buildResponseArray();
+  try {
+    const data = await requestJson("/api/vocabulary/quiz-v2/estimate", {
+      method: "POST",
+      body: JSON.stringify({ responses: allResponses }),
+    });
+    state.result = data.result;
+    renderResult();
+    showView("result");
+    setMessage("");
+  } catch (err) {
+    setMessage(`估算失败: ${err.message}`);
+  }
+}
+
+function renderResult() {
+  const r = state.result;
+  const totalQuestions = state.questions.length + state.stage2Questions.length;
+  const answered = state.responses.size + state.stage2Responses.size;
+  const hint = state.stage2Active ? "含细化测试" : "";
+
+  let comparisonHtml = '';
+  if (state.stage2Active && state.preRefineResult) {
+    const pre = state.preRefineResult;
+    const delta = r.point_estimate - pre.point_estimate;
+    const deltaSign = delta >= 0 ? '+' : '';
+    const betterClass = delta >= 0 ? 'delta-up' : 'delta-down';
+    comparisonHtml = `
+      <div class="refineComparison">
+        <div class="comparison-title">细化对比</div>
+        <div class="comparison-grid">
+          <div class="comparison-col">
+            <div class="comparison-label">细化前</div>
+            <strong>${pre.point_estimate} 词</strong>
+            <span>${pre.level || '—'}</span>
+          </div>
+          <div class="comparison-arrow">→</div>
+          <div class="comparison-col">
+            <div class="comparison-label">细化后</div>
+            <strong>${r.point_estimate} 词</strong>
+            <span>${r.level || '—'}</span>
+          </div>
+          <div class="comparison-delta ${betterClass}">
+            <div class="comparison-label">变化</div>
+            <strong>${deltaSign}${delta} 词</strong>
+            <span>(${r.confidence})</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  $("resultBox").innerHTML = `
+    ${comparisonHtml}
+    ${metric("词汇量估计", `${r.point_estimate} 词`)}
+    ${metric("θ 能力值", r.theta)}
+    ${metric("等级", r.level || "—")}
+    ${metric("置信度", r.confidence)}
+    ${metric("95% θ 区间", `${r.theta_ci_95[0]} ~ ${r.theta_ci_95[1]}`)}
+    ${metric("90% 词汇区间", `${r.vocabulary_range[0]} ~ ${r.vocabulary_range[1]}`)}
+    ${metric("有效样本", `${r.sample_size} 题`)}
+    ${metric("忽略样本", `${r.ignored_responses} 题`)}
+  `;
+
+  const btn = $("refineBtn");
+  if (state.stage2Active) {
+    btn.classList.add("hidden");
+  } else {
+    btn.classList.remove("hidden");
+    btn.disabled = false;
+    btn.textContent = "细化不确定的类";
+  }
+}
+
+function metric(label, value) {
+  return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
 }
 
 function optionClass(index, selected, answer, isAnswered) {
@@ -238,148 +606,9 @@ function optionClass(index, selected, answer, isAnswered) {
   return classes.join(" ");
 }
 
-function chooseOption(index) {
-  if (state.locked) return;
-  const question = state.questions[state.currentIndex];
-  if (!question || question.mode === "binary") return;
-  const known = index === question.answer;
-  state.responses.set(question.word, { word: question.word, known, choice: index });
-  state.locked = true;
-  renderCard();
-  scheduleAdvance();
-}
-
-function chooseUnknownOption(index) {
-  if (state.locked) return;
-  const question = state.questions[state.currentIndex];
-  if (!question || question.mode === "binary") return;
-
-  let known;
-  if (question.answer === null && index === 5) {
-    // Trap question + "没有正确答案" → correct!
-    known = true;
-  } else {
-    known = false;
-  }
-
-  state.responses.set(question.word, { word: question.word, known, choice: index });
-  state.locked = true;
-  renderCard();
-  scheduleAdvance();
-}
-
-function answerBinary(known) {
-  if (state.locked) return;
-  const question = state.questions[state.currentIndex];
-  if (!question) return;
-  state.responses.set(question.word, { word: question.word, known, choice: known ? 0 : 1 });
-  state.locked = true;
-  renderCard();
-  scheduleAdvance();
-}
-
-async function triggerStage2() {
-  state.stage2Loading = true;
-  $("phaseIndicator").textContent = "第二阶段加载中";
-  renderCard();
-  try {
-    const data = await requestJson("/api/vocabulary/quiz-stage2", {
-      method: "POST",
-      body: JSON.stringify(buildResponseArray()),
-    });
-    if (data.questions && data.questions.length > 0) {
-      state.phase = 2;
-      state.questions = data.questions;
-      state.allQuestions = state.allQuestions.concat(data.questions);
-      state.currentIndex = 0;
-      state.boundaryBuckets = data.boundary_buckets || [];
-      $("phaseIndicator").textContent = `第二阶段：${data.count} 题`;
-    } else {
-      // No Stage 2 questions → auto-submit
-      $("phaseIndicator").textContent = "测试完成";
-      submitTest();
-      return;
-    }
-  } catch (err) {
-    setMessage(`第二阶段加载失败: ${err.message}`);
-    $("phaseIndicator").textContent = "测试完成";
-    // Fall back to submit with Stage 1 only
-    submitTest();
-    return;
-  }
-  state.stage2Loading = false;
-  renderCard();
-}
-
-function buildResponseArray() {
-  // Build from allQuestions to include both Stage 1 and Stage 2
-  return state.allQuestions.map((item) => ({
-    word: item.word,
-    known: state.responses.get(item.word)?.known === true,
-  }));
-}
-
-function scheduleAdvance() {
-  clearAdvanceTimer();
-  state.advanceTimer = window.setTimeout(() => {
-    state.currentIndex += 1;
-    state.locked = false;
-    state.advanceTimer = null;
-    renderCard();
-  }, 500);
-}
-
-function clearAdvanceTimer() {
-  if (state.advanceTimer !== null) {
-    window.clearTimeout(state.advanceTimer);
-    state.advanceTimer = null;
-  }
-}
-
-async function submitTest() {
-  if (state.responses.size !== state.allQuestions.length) {
-    setMessage("请先完成所有题目");
-    return;
-  }
-  clearAdvanceTimer();
-  setMessage("正在估算");
-  const responses = buildResponseArray();
-  const data = await requestJson("/api/estimate", {
-    method: "POST",
-    body: JSON.stringify({ responses }),
-  });
-  state.result = data.result;
-  // Add stage info to result display
-  state.result._stage2_count = state.phase === 2 ? state.allQuestions.length - state.stage1QuestionCount : 0;
-  renderResult();
-  showView("result");
-  setMessage("");
-}
-
-function renderResult() {
-  const result = state.result;
-  const stageNote = result._stage2_count > 0
-    ? metric("二阶段补充", `${result._stage2_count} 题`)
-    : "";
-  const boundaryNote = state.boundaryBuckets.length > 0
-    ? metric("重点桶", state.boundaryBuckets.join("、"))
-    : "";
-  $("resultBox").innerHTML = `
-    ${metric("词汇量估计", `${result.point_estimate} 词`)}
-    ${metric("原始估计", `${result.raw_estimate} 词`)}
-    ${metric("等级", result.level)}
-    ${metric("置信度", result.confidence)}
-    ${metric("90% 区间", `${result.vocabulary_range[0]} - ${result.vocabulary_range[1]}`)}
-    ${metric("有效样本", `${result.sample_size} 题`)}
-    ${metric("忽略样本", `${result.ignored_responses} 题`)}
-    ${stageNote}
-    ${boundaryNote}
-  `;
-}
-
-function metric(label, value) {
-  return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
-}
+// ============================================================
+// Save record
+// ============================================================
 
 async function saveRecord() {
   if (!state.result) return;
@@ -389,24 +618,93 @@ async function saveRecord() {
   }
 
   const name = $("studentName").value.trim() || "匿名学生";
-  const cetRaw = $("cetScore").value.trim();
-  const cetScore = cetRaw === "" ? null : Number(cetRaw);
   const payload = {
-    student: { name, cet_score: cetScore },
+    student: { name },
     responses: buildResponseArray(),
     result: state.result,
   };
 
   $("saveStatus").textContent = "正在保存";
-  const data = await requestJson("/api/tests/save", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  state.saved = true;
-  $("saveStatus").textContent = `已保存，记录编号 #${data.record.id}`;
+  try {
+    const data = await requestJson("/api/tests/save", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    state.saved = true;
+    $("saveStatus").textContent = `已保存，记录编号 #${data.record.id}`;
+  } catch (err) {
+    $("saveStatus").textContent = err.message;
+  }
 }
 
-// buildResponses is replaced by buildResponseArray (above)
+// ============================================================
+// Article mode (unchanged)
+// ============================================================
+
+let _articleRequestToken = 0;
+
+async function estimateFromArticle() {
+  const text = $("articleInput").value.trim();
+  if (!text) {
+    setMessage("请先粘贴文章内容");
+    return;
+  }
+  if (text.split(/\s+/).length < 10) {
+    setMessage("文章太短，请粘贴至少 10 个词的文本");
+    return;
+  }
+
+  const btn = $("estimateArticleBtn");
+  btn.disabled = true;
+
+  $("articleSaveStatus").textContent = "";
+  $("articleResult").innerHTML = "";
+  $("articleResult").classList.add("hidden");
+  setMessage("正在分析文章...");
+
+  const token = ++_articleRequestToken;
+
+  try {
+    const data = await requestJson("/api/v2/estimate/article?_=" + Date.now(), {
+      method: "POST",
+      body: JSON.stringify({ article: text }),
+    });
+
+    if (token !== _articleRequestToken) return;
+
+    const result = data;
+    const stats = result.article_stats || {};
+    const coverage = result.coverage || {};
+    const coveragePercent = Number.isFinite(coverage.stage_vocab)
+      ? `${(coverage.stage_vocab * 100).toFixed(1)}%`
+      : "—";
+
+    $("articleResult").classList.remove("hidden");
+    $("articleResult").innerHTML = `
+      ${metric("词汇量估计", `${result.estimated_vocab ?? "—"} 词`)}
+      ${metric("等级", result.level || "—")}
+      ${metric("文章难度", result.difficulty_median ?? "—")}
+      ${metric("覆盖率", coveragePercent)}
+      ${metric(
+        "文章总词数",
+        `${stats.total_tokens ?? "—"} / 有效词数: ${stats.content_tokens ?? "—"} / 独特词汇: ${stats.unique_content_words ?? "—"}`
+      )}
+    `;
+    setMessage("");
+  } catch (err) {
+    if (token === _articleRequestToken) {
+      $("articleResult").innerHTML = "";
+      $("articleResult").classList.add("hidden");
+      setMessage(`文章估算失败: ${err.message}`);
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ============================================================
+// Records
+// ============================================================
 
 async function loadRecords() {
   showView("records");
@@ -438,34 +736,71 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-$("startBtn").addEventListener("click", () => startTest().catch((err) => setMessage(err.message)));
-$("submitBtn").addEventListener("click", () => submitTest().catch((err) => setMessage(err.message)));
+// ============================================================
+// Event listeners
+// ============================================================
+
+$("startBtn").addEventListener("click", () => startQuizV2().catch((err) => setMessage(err.message)));
+$("refineBtn").addEventListener("click", () => startStage2().catch((err) => setMessage(err.message)));
 $("saveBtn").addEventListener("click", () => saveRecord().catch((err) => ($("saveStatus").textContent = err.message)));
 $("restartBtn").addEventListener("click", () => {
-  clearAdvanceTimer();
+  state.phase = "setup";
+  state.preRefineResult = null;
+  $("refineBtn").classList.remove("hidden");
   showView("setup");
 });
+$("articleModeBtn").addEventListener("click", () => {
+  showView("article");
+  $("articleResult").classList.add("hidden");
+  $("articleSaveStatus").textContent = "";
+  setMessage("");
+});
+$("backFromArticleBtn").addEventListener("click", () => {
+  showView("setup");
+  $("articleResult").classList.add("hidden");
+  setMessage("");
+});
+$("estimateArticleBtn").addEventListener("click", () => estimateFromArticle().catch((err) => setMessage(err.message)));
 $("recordsBtn").addEventListener("click", () => loadRecords().catch((err) => setMessage(err.message)));
 $("backBtn").addEventListener("click", () => {
-  clearAdvanceTimer();
   showView("setup");
 });
 
 document.addEventListener("keydown", (event) => {
-  if (views.test.classList.contains("hidden") || state.locked) return;
+  if (views.test.classList.contains("hidden")) return;
   const key = event.key;
-  if (!["1", "2", "3", "4", "5", "6"].includes(key)) return;
-  const question = state.questions[state.currentIndex];
-  if (!question) return;
-  event.preventDefault();
-  if (question.mode === "binary") {
-    if (key === "1") answerBinary(true);
-    if (key === "2") answerBinary(false);
+
+  // Navigation: Left/Right arrows
+  if (key === "ArrowLeft") {
+    event.preventDefault();
+    goPrev();
     return;
   }
-  if (key === "5") { chooseUnknownOption(4); return; }
-  if (key === "6") { chooseUnknownOption(5); return; }
-  chooseOption(Number(key) - 1);
+  if (key === "ArrowRight") {
+    event.preventDefault();
+    goNext();
+    return;
+  }
+
+  // Answer selection: 1-6
+  if (!["1", "2", "3", "4", "5", "6"].includes(key)) return;
+
+  const isStage2 = state.phase === "quiz_stage2";
+  const questions = isStage2 ? state.stage2Questions : state.questions;
+  const question = questions[state.currentIndex];
+  if (!question) return;
+
+  event.preventDefault();
+
+  if (question.mode === "binary") {
+    if (key === "1") answerBinary(true, isStage2);
+    if (key === "2") answerBinary(false, isStage2);
+    return;
+  }
+
+  if (key === "5") { chooseUnknown(4, isStage2); return; }
+  if (key === "6") { chooseUnknown(5, isStage2); return; }
+  chooseOption(Number(key) - 1, isStage2);
 });
 
 loadStats();

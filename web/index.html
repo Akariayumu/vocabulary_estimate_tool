@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>英语词汇量估算工具</title>
+    <title>英语词汇量估算工具 v2</title>
     <link rel="stylesheet" href="/web/styles.css" />
   </head>
   <body>
@@ -13,6 +13,7 @@
           <h1>英语词汇量估算工具</h1>
           <p id="bankInfo">词库加载中</p>
         </div>
+        <button id="articleModeBtn" class="ghost" type="button">文章估算</button>
         <button id="recordsBtn" class="ghost" type="button">历史</button>
       </section>
 
@@ -21,42 +22,40 @@
           姓名
           <input id="studentName" type="text" placeholder="匿名学生" autocomplete="name" />
         </label>
-        <label>
-          CET 分数
-          <input id="cetScore" type="number" min="0" max="750" placeholder="可选" />
-        </label>
-        <label>
-          每个词频层抽样数
-          <select id="perBucket">
-            <option value="4" selected>4（约 36 题）</option>
-            <option value="6">6（约 54 题）</option>
-            <option value="8">8（约 72 题）</option>
-          </select>
-        </label>
         <button id="startBtn" class="primary" type="button">开始测试</button>
+        <p class="hint">共 40 道单选题，完成后自动估算词汇量</p>
+      </section>
+
+      <section id="articleView" class="panel hidden">
+        <div class="sectionHeader">
+          <h2>文章词汇量估算</h2>
+          <button id="backFromArticleBtn" class="ghost" type="button">返回测试</button>
+        </div>
+        <textarea id="articleInput" placeholder="在此粘贴英语文章..." rows="15"></textarea>
+        <button id="estimateArticleBtn" class="primary" type="button">开始估算</button>
+        <div id="articleResult" class="resultGrid hidden"></div>
+        <p id="articleSaveStatus" class="status"></p>
       </section>
 
       <section id="testView" class="panel hidden">
         <div class="testHeader">
           <div>
-            <strong id="pageTitle">第 1/0 题</strong>
+            <strong id="pageTitle">第 1/60 题</strong>
             <span id="phaseIndicator"></span>
-            <span id="progressText">0/0</span>
+            <span id="progressText">0/60</span>
           </div>
-          <progress id="progressBar" value="0" max="100"></progress>
+          <progress id="progressBar" value="0" max="60"></progress>
         </div>
         <div id="wordList" class="quizStage" aria-live="polite"></div>
-        <div class="pager submitPager">
-          <button id="submitBtn" type="button" class="primary hidden">提交</button>
-        </div>
       </section>
 
       <section id="resultView" class="panel hidden">
         <h2>测试结果</h2>
         <div id="resultBox" class="resultGrid"></div>
         <div class="actions">
+          <button id="refineBtn" class="primary" type="button">细化不确定的类</button>
           <button id="restartBtn" class="ghost" type="button">重新测试</button>
-          <button id="saveBtn" class="primary" type="button">保存记录</button>
+          <button id="saveBtn" class="ghost" type="button">保存记录</button>
         </div>
         <p id="saveStatus" class="status"></p>
       </section>
@@ -72,6 +71,6 @@
       <p id="message" class="message" role="status"></p>
     </main>
 
-    <script src="/web/app.js?v=2"></script>
+    <script src="/web/app.js?v=1782184622"></script>
   </body>
 </html>

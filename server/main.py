@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -13,10 +14,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from vocab_estimator.config import DEFAULT_CONFIG
 from vocab_estimator.sampler import VocabularySampler
-from vocab_estimator.vocab_bank import VocabBank
-from vocab_estimator.vocab_model import VocabEstimator
+from vocab_estimator.stratified_quiz import StratifiedQuiz
+from vocab_estimator.config import DEFAULT_CONFIG
+from vocab_estimator.article_estimator import estimate_article
 
 from .database import (
     count_test_records,
@@ -49,18 +50,39 @@ class SaveTestPayload(BaseModel):
     result: dict[str, Any] | None = None
 
 
+class ArticleEstimatePayload(BaseModel):
+    """Payload for estimating article vocabulary demand."""
+
+    article: str = Field(..., min_length=1)
+
+
 @lru_cache(maxsize=1)
-def get_vocab_bank() -> VocabBank:
+def get_vocab_bank():
+    from vocab_estimator.vocab_bank import VocabBank
+
     return VocabBank(DEFAULT_CONFIG)
 
 
 @lru_cache(maxsize=1)
-def get_estimator() -> VocabEstimator:
+def get_estimator():
+    from vocab_estimator.vocab_model import VocabEstimator
+
     return VocabEstimator(get_vocab_bank(), DEFAULT_CONFIG)
 
 
 def get_sampler(seed: int | None = None) -> VocabularySampler:
     return VocabularySampler(get_vocab_bank(), DEFAULT_CONFIG, seed=seed)
+
+
+@lru_cache(maxsize=8)
+def get_stratified_quiz(phase1_question_count: int | None = None) -> StratifiedQuiz:
+    # v2 StratifiedQuiz is the production quiz model; legacy v1 endpoints remain for compatibility.
+    question_count = phase1_question_count or DEFAULT_CONFIG.phase1_question_count
+    return StratifiedQuiz(
+        vocab_bank=None,
+        config=DEFAULT_CONFIG,
+        phase1_question_count=question_count,
+    )
 
 
 app = FastAPI(
@@ -185,23 +207,51 @@ def vocabulary_quiz(
 def vocabulary_quiz_stage2(payload: Any = Body(...)) -> dict[str, Any]:
     """Return Stage 2 refined quiz questions targeting boundary buckets.
 
-    Accepts the Stage 1 responses and generates additional questions for
-    buckets where the learner's known-rate is in the uncertain range.
+    Accepts the Stage 1 (or adaptive) responses and generates additional
+    questions for buckets where the learner's known-rate is in the uncertain
+    range. When warmup_correct is provided, the Stage 2 scope is reduced:
+    fewer extra questions and fewer boundary buckets are targeted.
     """
-    responses = parse_response_payload(payload)
+    # Support both raw response list and dict with warmup info
+    if isinstance(payload, dict) and "responses" in payload:
+        raw_responses = payload["responses"]
+        warmup_correct = payload.get("warmup_correct")
+    else:
+        raw_responses = payload
+        warmup_correct = None
+
+    responses = parse_response_payload({"responses": raw_responses} if isinstance(raw_responses, list) else raw_responses)
     if not responses:
         raise HTTPException(status_code=400, detail="responses cannot be empty")
 
     effective_seed = random.SystemRandom().randint(1, 1_000_000_000)
     rng = random.Random(effective_seed)
     sampler = get_sampler(effective_seed)
-    extra_per_bucket = DEFAULT_CONFIG.stage2_extra_per_bucket
 
-    items, boundary_buckets = sampler.stage2_refine_sample(
-        responses, extra_per_bucket=extra_per_bucket
-    )
+    # Reduced Stage 2 when warmup info is available
+    if warmup_correct is not None:
+        # Use fewer extra questions per bucket (3-4 instead of 8)
+        extra_per_bucket = 3
+        # Only target 2-3 buckets near estimated level
+        items, boundary_buckets = sampler.stage2_refine_sample(
+            responses, extra_per_bucket=extra_per_bucket
+        )
+        # If too many buckets, keep only the closest to estimated boundary
+        if len(boundary_buckets) > 3:
+            boundary_buckets = boundary_buckets[:3]
+            # Re-sample limited to these buckets
+            seen = {word.lower() for word, _ in responses}
+            items = []
+            for bucket in boundary_buckets:
+                batch = sampler._sample_bucket(bucket, extra_per_bucket, exclude=seen)
+                items.extend(batch)
+                seen.update(word.lower() for word, _, _ in batch)
+    else:
+        extra_per_bucket = DEFAULT_CONFIG.stage2_extra_per_bucket
+        items, boundary_buckets = sampler.stage2_refine_sample(
+            responses, extra_per_bucket=extra_per_bucket
+        )
 
-    # Build quiz questions from the Stage 2 items
     questions = [
         build_quiz_question(word, rank, bucket, rng)
         for word, rank, bucket in items
@@ -213,6 +263,188 @@ def vocabulary_quiz_stage2(payload: Any = Body(...)) -> dict[str, Any]:
         "bounds": [DEFAULT_CONFIG.stage2_boundary_low, DEFAULT_CONFIG.stage2_boundary_high],
         "boundary_buckets": boundary_buckets,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stratified quiz v2 endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@app.get("/api/vocabulary/quiz-v2")
+def vocabulary_quiz_v2(
+    seed: int | None = Query(default=None),
+    balanced: bool = Query(default=False, description="Non-adaptive balanced sampling"),
+    question_count: int | None = Query(default=None, ge=1, le=40),
+) -> dict[str, Any]:
+    """Phase 1: stratified sampling questions.
+
+    Returns 30 questions by default, configurable up to the legacy 40-question
+    path. By default uses streaming stratified sampling;
+    set ``balanced=True`` for simple 2-per-class sampling.
+    """
+    # Time-based seed ensures different words per request without mutating the shared quiz.
+    effective_seed = seed if seed is not None else int(time.time() * 1000) % (2**31)
+    rng = random.Random(effective_seed)
+    quiz = get_stratified_quiz(question_count)
+    items = quiz.phase1_sample(adaptive=not balanced, rng=rng)
+    questions = [build_v2_question(item, rng) for item in items]
+
+    return {
+        "questions": questions,
+        "count": len(questions),
+        "phase1_question_count": quiz.phase1_question_count,
+        "seed": effective_seed,
+        "quiz_id": str(effective_seed),
+        "balanced": balanced,
+        "sampling_info": quiz.get_sampling_info(),
+    }
+
+
+@app.post("/api/vocabulary/quiz-v2/stream")
+def vocabulary_quiz_v2_stream(payload: Any = Body(...)) -> dict[str, Any]:
+    """Streaming estimate from answered v2 responses plus the next 5 questions."""
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="payload must be an object")
+
+    raw_responses = payload.get("responses", [])
+    responses = parse_response_payload({"responses": raw_responses})
+    if not responses:
+        raise HTTPException(status_code=400, detail="responses cannot be empty")
+
+    question_count = payload.get("phase1_question_count") or payload.get("question_count")
+    if question_count is not None:
+        try:
+            question_count = int(question_count)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="phase1_question_count must be an integer") from exc
+        if question_count < 1 or question_count > 40:
+            raise HTTPException(status_code=400, detail="phase1_question_count must be between 1 and 40")
+
+    quiz = get_stratified_quiz(question_count)
+    quiz_id = payload.get("quiz_id")
+    if quiz_id is not None:
+        try:
+            effective_seed = int(quiz_id)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="quiz_id must be the seed returned by quiz-v2") from exc
+    else:
+        effective_seed = int(time.time() * 1000) % (2**31)
+
+    sample_rng = random.Random(effective_seed)
+    question_rng = random.Random(effective_seed)
+    phase1_items = quiz.phase1_sample(rng=sample_rng)
+    result = quiz.stream_estimate(
+        responses,
+        next_count=5,
+        phase1_items=phase1_items,
+    )
+    suggested_questions = [
+        build_v2_question(item, question_rng)
+        for item in result.get("suggested_items", [])
+    ]
+
+    return {
+        "result": {
+            key: value
+            for key, value in result.items()
+            if key != "suggested_items"
+        },
+        "suggested_words": [item["word"] for item in result.get("suggested_items", [])],
+        "suggested_questions": suggested_questions,
+        "quiz_id": str(effective_seed),
+        "phase1_question_count": quiz.phase1_question_count,
+    }
+
+
+@app.post("/api/vocabulary/quiz-v2-stage2")
+def vocabulary_quiz_v2_stage2(payload: Any = Body(...)) -> dict[str, Any]:
+    """Phase 2: refined questions for low-confidence difficulty classes.
+
+    Payload format::
+
+        {
+            "responses": [{"word": "...", "known": true}, ...],
+            "theta": null  # optional, omit to auto-compute
+        }
+    """
+    raw_responses = payload.get("responses", [])
+    forced_theta = payload.get("theta")
+
+    if not raw_responses:
+        raise HTTPException(status_code=400, detail="responses cannot be empty")
+
+    responses = parse_response_payload({"responses": raw_responses})
+    quiz = get_stratified_quiz()
+
+    if forced_theta is not None:
+        theta = float(forced_theta)
+        theta_ci = (theta - 0.5, theta + 0.5)
+    else:
+        theta, theta_ci = quiz.fit_ability(responses)
+
+    low_conf = quiz._identify_low_confidence(responses)
+
+    # Bug 2: time-based seed for each request
+    effective_seed = int(time.time() * 1000) % (2**31)
+    rng = random.Random(effective_seed)
+
+    # extract all Phase 1 words so Phase 2 doesn't re-test them
+    phase1_words = {word.lower() for word, _ in responses}
+
+    phase2_items = quiz.phase2_sample(
+        theta,
+        low_confidence_classes=low_conf,
+        responses=responses,
+        n_per_class=4,
+        exclude=phase1_words,
+    )
+    questions = []
+    for item in phase2_items:
+        diff_label = f"cluster_{item['cluster_20']}"
+        q = build_quiz_question(word=item["word"], rank=0, bucket=diff_label, rng=rng)
+        q["difficulty"] = round(item["difficulty"], 4)
+        q["cluster_20"] = item["cluster_20"]
+        q["cluster_100"] = item["cluster_100"]
+        questions.append(q)
+
+    return {
+        "questions": questions,
+        "count": len(questions),
+        "theta": round(theta, 4),
+        "theta_ci_95": [round(theta_ci[0], 4), round(theta_ci[1], 4)],
+        "low_confidence_classes": low_conf,
+        "low_confidence_count": len(low_conf),
+    }
+
+
+@app.post("/api/vocabulary/quiz-v2/estimate")
+def vocabulary_quiz_v2_estimate(payload: Any = Body(...)) -> dict[str, Any]:
+    """Estimate vocabulary from v2 quiz responses using the Rasch model.
+
+    Accepts all Phase 1 (and optional Phase 2) responses and returns
+    the Rasch-based vocabulary estimate.
+    """
+    responses = parse_response_payload(payload)
+    if not responses:
+        raise HTTPException(status_code=400, detail="responses cannot be empty")
+
+    quiz = get_stratified_quiz()
+    result = quiz.estimate_with_ci(responses)
+
+    return {
+        "result": result,
+        "input": {"response_count": len(responses)},
+    }
+
+
+@app.post("/api/v2/estimate/article")
+def estimate_article_v2(payload: ArticleEstimatePayload) -> dict[str, Any]:
+    """Estimate article vocabulary demand from stage_vocab difficulty data."""
+
+    try:
+        return estimate_article(payload.article)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/tests/save")
@@ -264,7 +496,7 @@ def build_quiz_question(
     Users must pick "没有正确答案" to answer correctly.
     """
 
-    TRAP_PROBABILITY = 0.3
+    TRAP_PROBABILITY = 0.1
 
     answer_text = translation_for(word)
     if answer_text is None:
@@ -321,8 +553,7 @@ def translation_for(word: str) -> str | None:
     lower = word.strip().lower()
     if lower in TRANSLATIONS:
         return TRANSLATIONS[lower]
-    lemma = get_vocab_bank().lemmatizer.normalize(lower).lower()
-    return TRANSLATIONS.get(lemma)
+    return None
 
 
 def distractor_translations(
@@ -332,9 +563,12 @@ def distractor_translations(
     rng: random.Random,
     count: int = 3,
 ) -> list[str]:
-    """Pick unique Chinese distractors, preferring the same frequency bucket."""
+    """Pick unique Chinese distractors, preferring the same frequency bucket.
 
-    bank = get_vocab_bank()
+    For v2-style buckets (``"cluster_*"``) this skips ``VocabBank`` entirely
+    and uses only ``TRANSLATIONS``, avoiding wordfreq loading.
+    """
+
     exclude = {word.strip().lower()}
 
     def collect(candidates: list[str]) -> list[str]:
@@ -352,6 +586,13 @@ def distractor_translations(
             seen.add(text)
             values.append(text)
         return values
+
+    if bucket.startswith("cluster_"):
+        # v2 path: skip VocabBank entirely, use TRANSLATIONS only
+        return collect(list(TRANSLATIONS))[:count]
+
+    # v1 path: use VocabBank for same-bucket distractors
+    bank = get_vocab_bank()
 
     same_bucket_words = [item.word for item in bank.get_items_in_bucket(bucket)]
     all_bank_words = [item.word for item in bank.items]
@@ -410,8 +651,18 @@ def parse_response_payload(payload: Any) -> list[tuple[str, bool]]:
 
         if not isinstance(word, str) or not word.strip():
             raise HTTPException(status_code=400, detail=f"word at index {idx} must be a string")
-        responses.append((word.strip(), bool(known)))
+        # Strict boolean validation: reject strings like "false" (non-empty str → True bug)
+        if not isinstance(known, bool):
+            raise HTTPException(status_code=400, detail=f"known at index {idx} must be a boolean (true/false), got {type(known).__name__}")
+        responses.append((word.strip(), known))
     return responses
+
+
+def _strict_bool(val):
+    """Parse known field: only True/False accepted; 'false'/'true' strings → 400."""
+    if isinstance(val, bool):
+        return val
+    raise HTTPException(status_code=400, detail=f"known must be a boolean, got {type(val).__name__}")
 
 
 def parse_group_payload(payload: Any) -> dict[str, list[tuple[str, bool]]]:

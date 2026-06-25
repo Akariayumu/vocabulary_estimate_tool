@@ -8,6 +8,7 @@ filtered, and then assigned to frequency-rank buckets.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 from .config import DEFAULT_CONFIG, EstimatorConfig, bucket_label
@@ -133,15 +134,45 @@ class VocabBank:
         self.used_fallback = words_with_ranks is None and not self._wordfreq_available
 
     def _load_ranked_words(self) -> list[tuple[str, int]]:
-        """Return ranked word forms from wordfreq or the built-in fallback."""
+        """Return ranked word forms from wordfreq or the built-in fallback.
+        Uses pickle cache to avoid re-loading the 200MB wordfreq dictionary on restart."""
+
+        import pickle as _pickle
+        import time as _time
+
+        cache_path = Path("/tmp/vocab_bank_words.pkl")
+        
+        # Try pickle cache first
+        if cache_path.exists():
+            try:
+                t0 = _time.time()
+                with open(cache_path, "rb") as f:
+                    words = _pickle.load(f)
+                self._wordfreq_available = True
+                print(f"  VocabBank loaded {len(words)} words from cache in {_time.time()-t0:.1f}s")
+                return words
+            except Exception:
+                cache_path.unlink(missing_ok=True)
 
         self._wordfreq_available = False
         try:
             from wordfreq import top_n_list
 
+            t0 = _time.time()
             words = top_n_list("en", self.config.vocab_size * 3)
+            result = [(word, rank) for rank, word in enumerate(words, start=1)]
+            print(f"  wordfreq loaded {len(result)} words in {_time.time()-t0:.1f}s")
+            
+            # Save to cache
+            try:
+                with open(cache_path, "wb") as f:
+                    _pickle.dump(result, f)
+                print(f"  Cache saved to {cache_path}")
+            except Exception:
+                pass
+            
             self._wordfreq_available = True
-            return [(word, rank) for rank, word in enumerate(words, start=1)]
+            return result
         except Exception:
             return self._fallback_words()
 

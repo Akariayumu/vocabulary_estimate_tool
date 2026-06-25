@@ -1,137 +1,225 @@
 #!/usr/bin/env python3
-"""Fill ALL missing Chinese translations using Google Translate API.
+"""Fill pending translations in data/stage_vocab.json with checkpoint resume."""
 
-Covers 8k through 30k buckets (excludes 1k-5k which are 100% covered).
-"""
+from __future__ import annotations
 
-import os, sys, re, time, json
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
+import json
+import os
+import sys
+import time
+from pathlib import Path
+from typing import Any
 
 import requests
-from vocab_estimator.config import DEFAULT_CONFIG
-from vocab_estimator.vocab_bank import VocabBank
-from server.translations import TRANSLATIONS
 
-bank = VocabBank(DEFAULT_CONFIG)
-existing = {k.lower(): k for k in TRANSLATIONS}
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
-# Collect ALL missing words from ALL buckets (skip 1k-5k which are complete)
-missing_words = []
-skip_buckets = {'1k', '2k', '3k', '5k'}
-sizes = bank.bucket_sizes()
-
-for item in bank.items:
-    bucket = bank.get_bucket(item.word)
-    if bucket in skip_buckets:
-        continue
-    w = item.word.lower()
-    if w in existing:
-        continue
-    lemma = bank.lemmatizer.normalize(w).lower()
-    if lemma in existing:
-        continue
-    # Skip very short words, acronyms, punctuation-like
-    if len(w) < 2:
-        continue
-    if w.isupper() and len(w) <= 4:
-        continue
-    if not re.match(r'^[a-z][a-z\-\']*[a-z]$', w) and not re.match(r'^[a-z]{2,}$', w):
-        continue
-    missing_words.append((item.rank, w, bucket))
-
-print(f"Total missing words: {len(missing_words)}")
-print()
-
-# Group by bucket
-by_bucket = {}
-for rank, word, bucket in missing_words:
-    by_bucket.setdefault(bucket, []).append((rank, word))
-for b in ['8k','10k','15k','20k','30k']:
-    if b in by_bucket:
-        print(f"  {b}: {len(by_bucket[b])} missing")
-
-BATCH_SIZE = 150  # words per API call
+STAGE_VOCAB_PATH = PROJECT_ROOT / "data" / "stage_vocab.json"
+CHECKPOINT_PATH = PROJECT_ROOT / "data" / "translation_checkpoint.json"
 TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
 
-def translate_batch(words):
-    """Translate a list of words using Google Translate API."""
-    text = "\n".join(words)
+BATCH_SIZE = 50
+SLEEP_SECONDS = 3
+MAX_BATCHES_PER_RUN = int(os.environ.get("MAX_BATCHES_PER_RUN", "10"))
+
+
+class TranslationError(RuntimeError):
+    """Raised when the current run should stop and preserve the checkpoint."""
+
+
+def load_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_json(path: Path, data: dict[str, Any]) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def load_checkpoint(pending_count: int) -> dict[str, int]:
+    if not CHECKPOINT_PATH.exists():
+        return {"last_index": 0, "filled": 0, "total": pending_count}
+
+    checkpoint = load_json(CHECKPOINT_PATH)
+    total = int(checkpoint.get("total") or pending_count)
+    return {
+        "last_index": max(0, int(checkpoint.get("last_index", 0))),
+        "filled": max(0, int(checkpoint.get("filled", 0))),
+        "total": max(total, pending_count),
+    }
+
+
+def save_checkpoint(last_index: int, filled: int, total: int) -> None:
+    write_json(
+        CHECKPOINT_PATH,
+        {"last_index": last_index, "filled": filled, "total": total},
+    )
+
+
+def pending_entries(data: dict[str, Any], start_index: int) -> list[tuple[int, str]]:
+    entries = []
+    for index, (word, info) in enumerate(data["word_to_stage"].items()):
+        if index < start_index:
+            continue
+        if info.get("translation_pending"):
+            entries.append((index, word))
+    return entries
+
+
+def count_pending(data: dict[str, Any]) -> int:
+    return sum(
+        1
+        for info in data["word_to_stage"].values()
+        if info.get("translation_pending")
+    )
+
+
+def update_translation_meta(data: dict[str, Any]) -> None:
+    word_to_stage = data["word_to_stage"]
+    translated = sum(1 for info in word_to_stage.values() if info.get("translation"))
+    pending = count_pending(data)
+    cleanup = data.setdefault("meta", {}).setdefault("cleanup", {})
+    cleanup["translation_filled"] = translated
+    cleanup["translation_pending"] = pending
+
+
+def _map_translation(
+    results: dict[str, str],
+    original: str,
+    translated: str,
+) -> None:
+    original = original.strip()
+    translated = translated.strip()
+    if not original or not translated:
+        return
+
+    original_lines = [line.strip() for line in original.splitlines() if line.strip()]
+    translated_lines = [
+        line.strip() for line in translated.splitlines() if line.strip()
+    ]
+    if len(original_lines) == len(translated_lines) and len(original_lines) > 1:
+        for src, dst in zip(original_lines, translated_lines):
+            results[src.lower()] = dst
+        return
+
+    results[original.lower()] = translated
+
+
+def translate_batch(words: list[str]) -> dict[str, str]:
     params = {
         "client": "gtx",
         "sl": "en",
         "tl": "zh-CN",
         "dt": "t",
-        "q": text,
+        "q": "\n".join(words),
     }
+
     try:
-        r = requests.get(TRANSLATE_URL, params=params, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        results = {}
-        for entry in data[0]:
-            if isinstance(entry, list) and len(entry) >= 2:
-                translated = entry[0].strip()
-                original = entry[1].strip()
-                if translated and original:
-                    results[original.lower()] = translated
-        return results
-    except Exception as e:
-        print(f"  API error: {e}")
-        return {}
+        response = requests.get(TRANSLATE_URL, params=params, timeout=30)
+        if response.status_code == 429:
+            raise TranslationError("HTTP 429 rate limit")
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as exc:
+        raise TranslationError(f"network/API error: {exc}") from exc
+    except ValueError as exc:
+        raise TranslationError(f"invalid API JSON response: {exc}") from exc
 
-# Process in batches
-all_translations = {}
-total_batches = (len(missing_words) + BATCH_SIZE - 1) // BATCH_SIZE
+    results: dict[str, str] = {}
+    for entry in data[0]:
+        if isinstance(entry, list) and len(entry) >= 2:
+            _map_translation(results, str(entry[1] or ""), str(entry[0] or ""))
 
-for start in range(0, len(missing_words), BATCH_SIZE):
-    batch = missing_words[start:start + BATCH_SIZE]
-    batch_num = start // BATCH_SIZE + 1
-    
-    words = [w for _, w, _ in batch]
-    print(f"\rBatch {batch_num}/{total_batches} ({len(words)} words)...", end="", flush=True)
-    
-    results = translate_batch(words)
-    all_translations.update(results)
-    print(f" got {len(results)} good", end="", flush=True)
-    
-    # Rate limit: 1 second between batches
-    time.sleep(1.0)
+    if not results:
+        raise TranslationError("API returned no translations")
 
-print(f"\n\nTotal translations generated: {len(all_translations)}")
+    return results
 
-# Merge into translations.py
-if all_translations:
-    path = os.path.join(PROJECT_ROOT, "server", "translations.py")
-    with open(path, "r") as f:
-        content = f.read()
-    
-    # Find the closing brace
-    lines = content.split("\n")
-    insert_at = None
-    for i in range(len(lines) - 1, -1, -1):
-        s = lines[i].strip()
-        if s and s[0] == "}":
-            insert_at = i
+
+def apply_translations(data: dict[str, Any], words: list[str], translations: dict[str, str]) -> int:
+    filled = 0
+    word_to_stage = data["word_to_stage"]
+    for word in words:
+        translation = translations.get(word.lower())
+        if not translation:
+            continue
+        info = word_to_stage[word]
+        info["translation"] = translation
+        info.pop("translation_pending", None)
+        filled += 1
+    return filled
+
+
+def main() -> int:
+    data = load_json(STAGE_VOCAB_PATH)
+    initial_pending = count_pending(data)
+    checkpoint = load_checkpoint(initial_pending)
+    total = checkpoint["total"] or initial_pending
+    last_index = checkpoint["last_index"]
+
+    if initial_pending == 0:
+        save_checkpoint(last_index, total, total)
+        print(f"已翻译 {total}/{total}，下一批从索引 {last_index} 开始")
+        return 0
+
+    batches_run = 0
+    while batches_run < MAX_BATCHES_PER_RUN:
+        entries = pending_entries(data, last_index)
+        if not entries:
+            last_index = 0
+            entries = pending_entries(data, last_index)
+        if not entries:
             break
-    
-    if insert_at is not None:
-        new_entries = []
-        for word in sorted(all_translations):
-            gloss = all_translations[word]
-            if gloss and len(gloss) <= 30:
-                new_entries.append(f'    "{word}": "{gloss}",')
-        new_lines = lines[:insert_at] + new_entries + lines[insert_at:]
-        with open(path, "w") as f:
-            f.write("\n".join(new_lines))
-        print(f"Appended {len(new_entries)} translations to translations.py")
-        
-        # Verify
-        from server.translations import TRANSLATIONS
-        known = [w for w in [item.word for item in bank.items] if w.lower() in {k.lower(): k for k in TRANSLATIONS}]
-        print(f"New total coverage: {len(known)}/{len(bank.items)} ({len(known)/len(bank.items)*100:.1f}%)")
+
+        batch = entries[:BATCH_SIZE]
+        batch_words = [word for _, word in batch]
+        batch_no = batches_run + 1
+        print(
+            f"Batch {batch_no}: indexes {batch[0][0]}-{batch[-1][0]} "
+            f"({len(batch_words)} words)...",
+            flush=True,
+        )
+
+        try:
+            translations = translate_batch(batch_words)
+        except TranslationError as exc:
+            remaining = count_pending(data)
+            filled = max(checkpoint["filled"], total - remaining)
+            save_checkpoint(last_index, filled, total)
+            print(f"遇到错误：{exc}")
+            print(f"已翻译 {filled}/{total}，下一批从索引 {last_index} 开始")
+            return 0
+
+        filled_now = apply_translations(data, batch_words, translations)
+        last_index = batch[-1][0] + 1
+        update_translation_meta(data)
+        write_json(STAGE_VOCAB_PATH, data)
+
+        remaining = count_pending(data)
+        filled = max(checkpoint["filled"] + filled_now, total - remaining)
+        checkpoint = {"last_index": last_index, "filled": filled, "total": total}
+        save_checkpoint(last_index, filled, total)
+
+        missing = len(batch_words) - filled_now
+        print(f"  写入 {filled_now} 个翻译，未返回 {missing} 个")
+        print(f"已翻译 {filled}/{total}，下一批从索引 {last_index} 开始")
+
+        batches_run += 1
+        if batches_run < MAX_BATCHES_PER_RUN and count_pending(data) > 0:
+            time.sleep(SLEEP_SECONDS)
+
+    remaining = count_pending(data)
+    filled = total - remaining
+    save_checkpoint(last_index, filled, total)
+    if remaining:
+        print(f"本次已跑 {batches_run} 批，已翻译 {filled}/{total}，下一批从索引 {last_index} 开始")
     else:
-        print("ERROR: Could not find insertion point in translations.py")
-else:
-    print("ERROR: No translations generated")
+        print(f"全部完成：已翻译 {total}/{total}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

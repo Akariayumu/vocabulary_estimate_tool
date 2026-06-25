@@ -1,0 +1,40 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+
+# Generated data files (large JSON / numpy)
+data/word_embeddings_384d.npy
+data/word_embeddings_index.json
+data/stage_vocab.json.bak
+data/stage_vocab_backup_20260623.json
+data/stage_vocab_enhanced.json
+data/translation_checkpoint.json
+data/translations.json
+data/stage_vocab.json
+test_samples.json
+test_samples_trainer.json
+
+# SQLite database
+data/vocab_estimator.sqlite3
+
+# Training outputs & experiment logs
+outputs/
+optim/__pycache__/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Temp / cache
+/tmp/
+*.pkl
