@@ -114,15 +114,16 @@ def parse_cfpk_from_report() -> dict[str, dict[str, dict[str, object]]]:
         ):
             current = "v1"
             continue
-        if "v2 统一标定词库结果如下" in line:
+        if "v2 统一标定词库结果如下" in line or "v2 统一标定词库在" in line:
             current = "v2"
             continue
         if current and line.startswith("|"):
-            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            cells = [cell.strip().strip("*") for cell in line.strip().strip("|").split("|")]
             if len(cells) >= 3 and cells[0] in {"C", "F", "P", "K"}:
+                val = cells[1].replace(",", "")
                 parsed[current][cells[0]] = {
-                    "estimated_vocab": int(cells[1].replace(",", "")),
-                    "stage": cells[2],
+                    "estimated_vocab": int(val),
+                    "stage": cells[2] if "weighted_diff" not in line else "",
                 }
         elif current and not line.strip() and parsed[current]:
             current = None
