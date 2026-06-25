@@ -32,6 +32,18 @@ from .translations import TRANSLATIONS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = PROJECT_ROOT / "web"
+VOCAB_VERSION_PATHS = {
+    "v1": PROJECT_ROOT / "data" / "stage_vocab.json",
+    "original": PROJECT_ROOT / "data" / "stage_vocab.json",
+    "v2": PROJECT_ROOT / "data" / "stage_vocab_v2_clusterv1.json",
+    "v2_clusterv1": PROJECT_ROOT / "data" / "stage_vocab_v2_clusterv1.json",
+}
+VOCAB_VERSION_CANONICAL = {
+    "v1": "v1",
+    "original": "v1",
+    "v2": "v2_clusterv1",
+    "v2_clusterv1": "v2_clusterv1",
+}
 
 
 class StudentPayload(BaseModel):
@@ -54,6 +66,7 @@ class ArticleEstimatePayload(BaseModel):
     """Payload for estimating article vocabulary demand."""
 
     article: str = Field(..., min_length=1)
+    vocab_version: str | None = None
 
 
 @lru_cache(maxsize=1)
@@ -74,14 +87,47 @@ def get_sampler(seed: int | None = None) -> VocabularySampler:
     return VocabularySampler(get_vocab_bank(), DEFAULT_CONFIG, seed=seed)
 
 
+def normalize_vocab_version(vocab_version: str | None = None) -> str:
+    """Return the canonical stage-vocab version name."""
+
+    key = str(vocab_version or "v1").strip().lower()
+    if key not in VOCAB_VERSION_CANONICAL:
+        supported = ", ".join(sorted(VOCAB_VERSION_PATHS))
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported vocab_version '{vocab_version}'. Supported: {supported}",
+        )
+    return VOCAB_VERSION_CANONICAL[key]
+
+
+def get_vocab_path(vocab_version: str = "v1") -> Path:
+    """Map a stage-vocab version name or alias to the JSON file path."""
+
+    canonical = normalize_vocab_version(vocab_version)
+    return VOCAB_VERSION_PATHS[canonical]
+
+
+def payload_vocab_version(payload: Any, fallback: str | None = None) -> str:
+    if isinstance(payload, dict):
+        value = payload.get("vocab_version") or payload.get("vocabVersion") or fallback
+    else:
+        value = fallback
+    return normalize_vocab_version(value)
+
+
 @lru_cache(maxsize=8)
-def get_stratified_quiz(phase1_question_count: int | None = None) -> StratifiedQuiz:
+def get_stratified_quiz(
+    phase1_question_count: int | None = None,
+    vocab_version: str = "v1",
+) -> StratifiedQuiz:
     # v2 StratifiedQuiz is the production quiz model; legacy v1 endpoints remain for compatibility.
     question_count = phase1_question_count or DEFAULT_CONFIG.phase1_question_count
+    canonical_version = normalize_vocab_version(vocab_version)
     return StratifiedQuiz(
         vocab_bank=None,
         config=DEFAULT_CONFIG,
         phase1_question_count=question_count,
+        stage_vocab_path=get_vocab_path(canonical_version),
     )
 
 
@@ -275,6 +321,7 @@ def vocabulary_quiz_v2(
     seed: int | None = Query(default=None),
     balanced: bool = Query(default=False, description="Non-adaptive balanced sampling"),
     question_count: int | None = Query(default=None, ge=1, le=40),
+    vocab_version: str = Query(default="v1"),
 ) -> dict[str, Any]:
     """Phase 1: stratified sampling questions.
 
@@ -283,9 +330,10 @@ def vocabulary_quiz_v2(
     set ``balanced=True`` for simple 2-per-class sampling.
     """
     # Time-based seed ensures different words per request without mutating the shared quiz.
+    canonical_version = normalize_vocab_version(vocab_version)
     effective_seed = seed if seed is not None else int(time.time() * 1000) % (2**31)
     rng = random.Random(effective_seed)
-    quiz = get_stratified_quiz(question_count)
+    quiz = get_stratified_quiz(question_count, canonical_version)
     items = quiz.phase1_sample(adaptive=not balanced, rng=rng)
     questions = [build_v2_question(item, rng) for item in items]
 
@@ -296,12 +344,16 @@ def vocabulary_quiz_v2(
         "seed": effective_seed,
         "quiz_id": str(effective_seed),
         "balanced": balanced,
+        "vocab_version": canonical_version,
         "sampling_info": quiz.get_sampling_info(),
     }
 
 
 @app.post("/api/vocabulary/quiz-v2/stream")
-def vocabulary_quiz_v2_stream(payload: Any = Body(...)) -> dict[str, Any]:
+def vocabulary_quiz_v2_stream(
+    payload: Any = Body(...),
+    vocab_version: str | None = Query(default=None),
+) -> dict[str, Any]:
     """Streaming estimate from answered v2 responses plus the next 5 questions."""
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="payload must be an object")
@@ -320,7 +372,8 @@ def vocabulary_quiz_v2_stream(payload: Any = Body(...)) -> dict[str, Any]:
         if question_count < 1 or question_count > 40:
             raise HTTPException(status_code=400, detail="phase1_question_count must be between 1 and 40")
 
-    quiz = get_stratified_quiz(question_count)
+    canonical_version = payload_vocab_version(payload, vocab_version)
+    quiz = get_stratified_quiz(question_count, canonical_version)
     quiz_id = payload.get("quiz_id")
     if quiz_id is not None:
         try:
@@ -353,11 +406,15 @@ def vocabulary_quiz_v2_stream(payload: Any = Body(...)) -> dict[str, Any]:
         "suggested_questions": suggested_questions,
         "quiz_id": str(effective_seed),
         "phase1_question_count": quiz.phase1_question_count,
+        "vocab_version": canonical_version,
     }
 
 
 @app.post("/api/vocabulary/quiz-v2-stage2")
-def vocabulary_quiz_v2_stage2(payload: Any = Body(...)) -> dict[str, Any]:
+def vocabulary_quiz_v2_stage2(
+    payload: Any = Body(...),
+    vocab_version: str | None = Query(default=None),
+) -> dict[str, Any]:
     """Phase 2: refined questions for low-confidence difficulty classes.
 
     Payload format::
@@ -369,12 +426,13 @@ def vocabulary_quiz_v2_stage2(payload: Any = Body(...)) -> dict[str, Any]:
     """
     raw_responses = payload.get("responses", [])
     forced_theta = payload.get("theta")
+    canonical_version = payload_vocab_version(payload, vocab_version)
 
     if not raw_responses:
         raise HTTPException(status_code=400, detail="responses cannot be empty")
 
     responses = parse_response_payload({"responses": raw_responses})
-    quiz = get_stratified_quiz()
+    quiz = get_stratified_quiz(vocab_version=canonical_version)
 
     if forced_theta is not None:
         theta = float(forced_theta)
@@ -414,11 +472,15 @@ def vocabulary_quiz_v2_stage2(payload: Any = Body(...)) -> dict[str, Any]:
         "theta_ci_95": [round(theta_ci[0], 4), round(theta_ci[1], 4)],
         "low_confidence_classes": low_conf,
         "low_confidence_count": len(low_conf),
+        "vocab_version": canonical_version,
     }
 
 
 @app.post("/api/vocabulary/quiz-v2/estimate")
-def vocabulary_quiz_v2_estimate(payload: Any = Body(...)) -> dict[str, Any]:
+def vocabulary_quiz_v2_estimate(
+    payload: Any = Body(...),
+    vocab_version: str | None = Query(default=None),
+) -> dict[str, Any]:
     """Estimate vocabulary from v2 quiz responses using the Rasch model.
 
     Accepts all Phase 1 (and optional Phase 2) responses and returns
@@ -428,21 +490,32 @@ def vocabulary_quiz_v2_estimate(payload: Any = Body(...)) -> dict[str, Any]:
     if not responses:
         raise HTTPException(status_code=400, detail="responses cannot be empty")
 
-    quiz = get_stratified_quiz()
+    canonical_version = payload_vocab_version(payload, vocab_version)
+    quiz = get_stratified_quiz(vocab_version=canonical_version)
     result = quiz.estimate_with_ci(responses)
 
     return {
         "result": result,
-        "input": {"response_count": len(responses)},
+        "input": {
+            "response_count": len(responses),
+            "vocab_version": canonical_version,
+        },
+        "vocab_version": canonical_version,
     }
 
 
 @app.post("/api/v2/estimate/article")
-def estimate_article_v2(payload: ArticleEstimatePayload) -> dict[str, Any]:
+def estimate_article_v2(
+    payload: ArticleEstimatePayload,
+    vocab_version: str | None = Query(default=None),
+) -> dict[str, Any]:
     """Estimate article vocabulary demand from stage_vocab difficulty data."""
 
+    canonical_version = normalize_vocab_version(vocab_version or payload.vocab_version)
     try:
-        return estimate_article(payload.article)
+        result = estimate_article(payload.article, stage_vocab_path=get_vocab_path(canonical_version))
+        result["vocab_version"] = canonical_version
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -545,6 +618,25 @@ def build_quiz_question(
             "options": options,
             "answer": options.index(answer_text),
         }
+
+
+def build_v2_question(item: dict[str, Any], rng: random.Random) -> dict[str, Any]:
+    """Build a browser question from one StratifiedQuiz stage-vocab item."""
+
+    diff_label = f"cluster_{item.get('cluster_20', 'unknown')}"
+    question = build_quiz_question(
+        word=str(item["word"]),
+        rank=int(item.get("rank") or 0),
+        bucket=diff_label,
+        rng=rng,
+    )
+    if "difficulty" in item:
+        question["difficulty"] = round(float(item["difficulty"]), 4)
+    if "cluster_20" in item:
+        question["cluster_20"] = item["cluster_20"]
+    if "cluster_100" in item:
+        question["cluster_100"] = item["cluster_100"]
+    return question
 
 
 def translation_for(word: str) -> str | None:

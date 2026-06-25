@@ -13,9 +13,17 @@ const state = {
   preRefineResult: null, // snapshot taken before stage2 refinement
   flashChoice: null,
   advanceTimer: null,
+  vocabVersion: "v1",
+  quizVocabVersion: "v1",
 };
 
 const $ = (id) => document.getElementById(id);
+
+const VOCAB_VERSIONS = {
+  v1: "原始词库 (v1, 11,418词)",
+  v2: "扩展词库 (v2, 19,801词)",
+  v2_clusterv1: "扩展词库 (v2, 19,801词)",
+};
 
 const views = {
   setup: $("setupView"),
@@ -48,13 +56,22 @@ async function requestJson(url, options = {}) {
 }
 
 async function loadStats() {
-  try {
-    const stats = await requestJson("/api/vocabulary/stats");
-    const mode = stats.used_fallback ? "内置小词表" : "wordfreq 词库";
-    $("bankInfo").textContent = `${mode} · ${stats.size} 个 lemma 词族`;
-  } catch (err) {
-    $("bankInfo").textContent = "词库状态不可用";
-  }
+  renderVocabInfo();
+}
+
+function selectedVocabLabel(version = state.vocabVersion) {
+  return VOCAB_VERSIONS[version] || VOCAB_VERSIONS.v1;
+}
+
+function renderVocabInfo() {
+  $("bankInfo").textContent = `当前词库：${selectedVocabLabel()}`;
+}
+
+function withVocabVersion(params = {}, version = state.vocabVersion) {
+  return new URLSearchParams({
+    ...params,
+    vocab_version: version,
+  }).toString();
 }
 
 // ============================================================
@@ -63,8 +80,13 @@ async function loadStats() {
 
 async function startQuizV2() {
   setMessage("正在生成测试题目");
+  state.quizVocabVersion = state.vocabVersion;
   try {
-    const data = await requestJson(`/api/vocabulary/quiz-v2?seed=${Date.now() % 100000}&balanced=true`);
+    const query = withVocabVersion({
+      seed: Date.now() % 100000,
+      balanced: "true",
+    }, state.quizVocabVersion);
+    const data = await requestJson(`/api/vocabulary/quiz-v2?${query}`);
     state.questions = data.questions;
     state.responses = new Map();
     state.currentIndex = 0;
@@ -100,7 +122,10 @@ async function startStage2() {
     const allResponses = buildResponseArray();
     const data = await requestJson("/api/vocabulary/quiz-v2-stage2", {
       method: "POST",
-      body: JSON.stringify({ responses: allResponses }),
+      body: JSON.stringify({
+        responses: allResponses,
+        vocab_version: state.quizVocabVersion,
+      }),
     });
 
     if (!data.questions || data.questions.length === 0) {
@@ -523,7 +548,10 @@ async function submitEstimate() {
   try {
     const data = await requestJson("/api/vocabulary/quiz-v2/estimate", {
       method: "POST",
-      body: JSON.stringify({ responses: allResponses }),
+      body: JSON.stringify({
+        responses: allResponses,
+        vocab_version: state.quizVocabVersion,
+      }),
     });
     state.result = data.result;
     renderResult();
@@ -573,6 +601,7 @@ function renderResult() {
 
   $("resultBox").innerHTML = `
     ${comparisonHtml}
+    ${metric("词库版本", selectedVocabLabel(state.quizVocabVersion))}
     ${metric("词汇量估计", `${r.point_estimate} 词`)}
     ${metric("θ 能力值", r.theta)}
     ${metric("等级", r.level || "—")}
@@ -665,9 +694,13 @@ async function estimateFromArticle() {
   const token = ++_articleRequestToken;
 
   try {
-    const data = await requestJson("/api/v2/estimate/article?_=" + Date.now(), {
+    const query = withVocabVersion({ _: Date.now() });
+    const data = await requestJson(`/api/v2/estimate/article?${query}`, {
       method: "POST",
-      body: JSON.stringify({ article: text }),
+      body: JSON.stringify({
+        article: text,
+        vocab_version: state.vocabVersion,
+      }),
     });
 
     if (token !== _articleRequestToken) return;
@@ -681,6 +714,7 @@ async function estimateFromArticle() {
 
     $("articleResult").classList.remove("hidden");
     $("articleResult").innerHTML = `
+      ${metric("词库版本", selectedVocabLabel(result.vocab_version || state.vocabVersion))}
       ${metric("词汇量估计", `${result.estimated_vocab ?? "—"} 词`)}
       ${metric("等级", result.level || "—")}
       ${metric("文章难度", result.difficulty_median ?? "—")}
@@ -741,6 +775,13 @@ function escapeHtml(value) {
 // ============================================================
 
 $("startBtn").addEventListener("click", () => startQuizV2().catch((err) => setMessage(err.message)));
+$("vocabVersionSelect").addEventListener("change", (event) => {
+  state.vocabVersion = event.target.value;
+  renderVocabInfo();
+  $("articleResult").innerHTML = "";
+  $("articleResult").classList.add("hidden");
+  setMessage("");
+});
 $("refineBtn").addEventListener("click", () => startStage2().catch((err) => setMessage(err.message)));
 $("saveBtn").addEventListener("click", () => saveRecord().catch((err) => ($("saveStatus").textContent = err.message)));
 $("restartBtn").addEventListener("click", () => {

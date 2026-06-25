@@ -44,6 +44,37 @@ body {
   gap: 12px;
 }
 
+.topbarActions {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.vocabSelectLabel {
+  min-width: 230px;
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.vocabSelectLabel select {
+  margin-top: 4px;
+  padding: 10px 34px 10px 12px;
+  border-color: #c9d2df;
+  background-color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.vocabSelectLabel select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(23, 105, 224, 0.12);
+}
+
 .testHeader {
   flex-wrap: wrap;
 }
@@ -816,6 +847,17 @@ progress {
 
   .topbar {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .topbarActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .vocabSelectLabel {
+    flex: 1 1 100%;
+    min-width: 0;
   }
 
   .testHeader {
