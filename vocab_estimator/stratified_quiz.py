@@ -85,7 +85,7 @@ class StratifiedQuiz:
     _V1_VOCAB_SCALE = 0.8
     _V2_VOCAB_SCALE = 1.0
     _FIT_ABILITY_CI_Z = 1.96
-    _V2_THETA_CI_Z = 1.28
+    _V2_THETA_CI_Z = 0.5
     _V2_CONFIDENCE_HIGH_RATIO = 0.25
     _V2_CONFIDENCE_MID_RATIO = 0.50
 
