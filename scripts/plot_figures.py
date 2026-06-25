@@ -109,7 +109,9 @@ def parse_cfpk_from_report() -> dict[str, dict[str, dict[str, object]]]:
     current: str | None = None
 
     for line in report.splitlines():
-        if "v1 原始词库结果如下" in line:
+        if "v1 原始词库结果如下" in line or (
+            "v1 清洗词库" in line and "结果如下" in line
+        ):
             current = "v1"
             continue
         if "v2 统一标定词库结果如下" in line:
@@ -405,6 +407,7 @@ def plot_cfpk_comparison() -> None:
     ax.legend(loc="best")
 
     fig.tight_layout()
+    fig.savefig(FIGURE_DIR / "cfpk_comparison.png", dpi=300)
     save_pdf(fig, "cfpk_comparison.pdf")
 
 

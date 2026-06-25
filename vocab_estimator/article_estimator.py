@@ -835,8 +835,9 @@ def estimate_article(
 ) -> dict[str, Any]:
     """估算阅读一篇文章所需的词汇量。
 
-    估算值为文章 difficulty 中位数在阶段词库中的累计位置：
-    ``P(vocab_difficulty <= article_median) * N``。
+    估算值为文章 difficulty 尾部加权难度在阶段词库中的累计位置：
+    ``weighted_diff = 0.8 * p75 + 0.2 * p95``，
+    ``estimated_vocab = count(vocab_difficulty <= weighted_diff)``。
     """
 
     if not isinstance(article, str) or not article.strip():
@@ -861,10 +862,12 @@ def estimate_article(
     difficulties = sorted(item["difficulty"] for _, item in matched)
     difficulty_median = _quantile(difficulties, 0.50)
     p25 = _quantile(difficulties, 0.25)
-    p75 = _quantile(difficulties, 0.75)
+    p75 = difficulties[int(len(difficulties) * 0.75)]
+    p95 = difficulties[int(len(difficulties) * 0.95)]
+    difficulty_weighted = 0.8 * p75 + 0.2 * p95
 
     sorted_vocab_difficulties: list[float] = vocab["sorted_difficulties"]
-    cumulative_count = bisect.bisect_right(sorted_vocab_difficulties, difficulty_median)
+    cumulative_count = bisect.bisect_right(sorted_vocab_difficulties, difficulty_weighted)
     total_words = int(vocab["total_words"])
     estimated_vocab = max(1, min(total_words, int(round(cumulative_count))))
 
@@ -881,7 +884,10 @@ def estimate_article(
     coverage_unique = len(matched_unique) / len(unique_tokens)
 
     return {
-        "difficulty_median": round(difficulty_median, 4),
+        "difficulty_median": round(difficulty_weighted, 4),
+        "difficulty_weighted": round(difficulty_weighted, 4),
+        "difficulty_p75": round(p75, 4),
+        "difficulty_p95": round(p95, 4),
         "estimated_vocab": estimated_vocab,
         "level": _map_level(estimated_vocab, vocab["stage_levels"]),
         "coverage": {
@@ -890,6 +896,7 @@ def estimate_article(
                 "p25": round(p25, 4),
                 "median": round(difficulty_median, 4),
                 "p75": round(p75, 4),
+                "p95": round(p95, 4),
                 "min": round(difficulties[0], 4),
                 "max": round(difficulties[-1], 4),
                 "mean": round(mean(difficulties), 4),
