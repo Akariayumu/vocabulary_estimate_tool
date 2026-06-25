@@ -82,6 +82,12 @@ class StratifiedQuiz:
     """
 
     # ── 公共 API ──────────────────────────────────────────────────────────
+    _V1_VOCAB_SCALE = 0.8
+    _V2_VOCAB_SCALE = 1.0
+    _FIT_ABILITY_CI_Z = 1.96
+    _V2_THETA_CI_Z = 1.28
+    _V2_CONFIDENCE_HIGH_RATIO = 0.25
+    _V2_CONFIDENCE_MID_RATIO = 0.50
 
     def __init__(
         self,
@@ -103,6 +109,7 @@ class StratifiedQuiz:
         sv_path = Path(stage_vocab_path or _STAGE_VOCAB_PATH)
         with open(sv_path, encoding="utf-8") as f:
             raw = json.load(f)
+        self.vocab_version = self._detect_vocab_version(sv_path, raw)
 
         self._word_to_stage: dict[str, dict] = raw["word_to_stage"]
         # 仅保留带有 difficulty、cluster_20、cluster_100 的词
@@ -209,8 +216,8 @@ class StratifiedQuiz:
         fish = float(np.sum(p * (1.0 - p)))  # Fisher 计算式 = Σ σ·(1-σ)
         se = 1.0 / math.sqrt(max(fish, 1e-10)) if fish > 0 else 5.0
 
-        ci_low = theta - 1.96 * se
-        ci_high = theta + 1.96 * se
+        ci_low = theta - self._FIT_ABILITY_CI_Z * se
+        ci_high = theta + self._FIT_ABILITY_CI_Z * se
         return (theta, (ci_low, ci_high))
 
     def phase2_sample(
@@ -306,7 +313,8 @@ class StratifiedQuiz:
 
         返回与现有 API 格式兼容的 dict。
         """
-        theta, (ci_low, ci_high) = self.fit_ability(responses)
+        theta, theta_ci = self.fit_ability(responses)
+        ci_low, ci_high = self._vocab_ci_theta_bounds(theta, theta_ci)
         vocab_raw = self._vocab_at_theta(theta)
         vocab_low = self._vocab_at_theta(ci_low)
         vocab_high = self._vocab_at_theta(ci_high)
@@ -349,8 +357,9 @@ class StratifiedQuiz:
         ``continue_available`` 基于配置的 Phase 1 题量判断。
         建议题目沿用相同的流式 cluster 顺序，并排除已答词。
         """
-        theta, (ci_low, ci_high) = self.fit_ability(responses)
-        se = (ci_high - ci_low) / (2.0 * 1.96)
+        theta, theta_ci = self.fit_ability(responses)
+        se = self._theta_se_from_fit_ci(theta_ci)
+        ci_low, ci_high = self._vocab_ci_theta_bounds(theta, theta_ci)
         vocab_raw = self._vocab_at_theta(theta)
         vocab_low = self._vocab_at_theta(ci_low)
         vocab_high = self._vocab_at_theta(ci_high)
@@ -626,13 +635,42 @@ class StratifiedQuiz:
         return difficulties
 
     def _vocab_at_theta(self, theta: float) -> float:
-        """对所有词库词求和 P(known | θ)，再应用 0.8 校准。"""
+        """对所有词库词求和 P(known | θ)，再应用版本校准。"""
         total = 0.0
         for word, difficulty in self._word_difficulties.items():
             d_logit = _logit(max(0.001, min(0.999, difficulty)))
             total += _sigmoid_scalar(theta - d_logit)
-        # Bug 1：经验校准，raw 估算约高 25%
-        return total * 0.8
+        return total * self._vocab_scale()
+
+    @staticmethod
+    def _detect_vocab_version(path: Path, raw: dict) -> str:
+        """根据词库路径识别校准口径。"""
+        if "v2" in path.name.lower():
+            return "v2"
+        if len(raw.get("word_to_stage", {})) > 15_000:
+            return "v2"
+        return "v1"
+
+    def _is_v2_vocab(self) -> bool:
+        return self.vocab_version == "v2"
+
+    def _vocab_scale(self) -> float:
+        if self._is_v2_vocab():
+            return self._V2_VOCAB_SCALE
+        return self._V1_VOCAB_SCALE
+
+    def _theta_se_from_fit_ci(self, theta_ci: tuple[float, float]) -> float:
+        ci_low, ci_high = theta_ci
+        return (ci_high - ci_low) / (2.0 * self._FIT_ABILITY_CI_Z)
+
+    def _vocab_ci_theta_bounds(self, theta: float, theta_ci: tuple[float, float]) -> tuple[float, float]:
+        if not self._is_v2_vocab():
+            return theta_ci
+        se = self._theta_se_from_fit_ci(theta_ci)
+        return (
+            theta - self._V2_THETA_CI_Z * se,
+            theta + self._V2_THETA_CI_Z * se,
+        )
 
     @staticmethod
     def _item_information(theta: float, d_logit: float) -> float:
@@ -703,8 +741,13 @@ class StratifiedQuiz:
         if point <= 0:
             return "低"
         ratio = (ci_high - ci_low) / point
-        if ratio < self.config.confidence_high_ratio:
+        high_ratio = self.config.confidence_high_ratio
+        mid_ratio = self.config.confidence_mid_ratio
+        if self._is_v2_vocab():
+            high_ratio = self._V2_CONFIDENCE_HIGH_RATIO
+            mid_ratio = self._V2_CONFIDENCE_MID_RATIO
+        if ratio < high_ratio:
             return "高"
-        if ratio < self.config.confidence_mid_ratio:
+        if ratio < mid_ratio:
             return "中"
         return "低"
