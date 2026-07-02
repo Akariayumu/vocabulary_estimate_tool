@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import time
 from functools import lru_cache
@@ -636,13 +637,42 @@ def build_v2_question(item: dict[str, Any], rng: random.Random) -> dict[str, Any
     return question
 
 
+@lru_cache(maxsize=1)
+def _vocab_translation_fallback() -> dict[str, str]:
+    """从各 stage-vocab 词库的 ``translation`` 字段构建兜底释义表。
+
+    ``translations.json`` 与词库文件是两个独立的翻译来源，历史上出现过漂移：
+    词库扩展词的译文只写进了词库 JSON，却没有同步回 ``translations.json``，
+    导致这些词在网页答题时查不到释义（例如 ``ring-road``、``idealize``）。
+    此处把词库自带的 ``translation`` 作为兜底层，避免今后再次漂移。
+    """
+
+    fallback: dict[str, str] = {}
+    for path in set(VOCAB_VERSION_PATHS.values()):
+        try:
+            data = json.load(open(path, encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        word_to_stage = data.get("word_to_stage", data)
+        for word, entry in word_to_stage.items():
+            text = (entry.get("translation") or "").strip()
+            if not text:
+                continue
+            fallback.setdefault(word.strip().lower(), text)
+    return fallback
+
+
 def translation_for(word: str) -> str | None:
-    """返回某个词或其归一化 lemma 的中文释义。"""
+    """返回某个词或其归一化 lemma 的中文释义。
+
+    优先使用 ``translations.json``（人工整理的选择题释义），查不到时回退到
+    词库自带的 ``translation`` 字段，保证网页答题不会因两个翻译源不同步而空白。
+    """
 
     lower = word.strip().lower()
     if lower in TRANSLATIONS:
         return TRANSLATIONS[lower]
-    return None
+    return _vocab_translation_fallback().get(lower)
 
 
 def distractor_translations(
